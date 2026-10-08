@@ -1,26 +1,24 @@
 {
   "version": 2,
-  "frontend": {
-    "framework": "nextjs",
-    "origin": "./apps/web-landing",
-    "buildCommand": "next build",
-    "devCommand": "next dev -p 3000",
-    "port": 3000
-  },
+  "framework": "nextjs",
+  "buildCommand": "pnpm build",
+  "devCommand": "pnpm dev",
+  "installCommand": "pnpm install",
+  "outputDirectory": ".next",
+  "regions": ["iad1"],
   "functions": {
-    "./apps/api/src/entry.server.ts": {
+    "apps/api/src/main.ts": {
       "runtime": "nodejs20.x",
-      "region": "auto"
+      "maxDuration": 30
     }
   },
-  "routes": [
+  "rewrites": [
     {
-      "source": "/(.*)",
-      "destination": "/apps/web-landing/$1"
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
     }
   ],
-  "environment": {
-    "NODE_ENV": "production",
-    "PORT": "3000"
+  "env": {
+    "NODE_ENV": "production"
   }
 }
