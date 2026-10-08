@@ -84,7 +84,7 @@ export function del<T = unknown>(path: string): Promise<T> {
 }
 
 /** URL do app operacional (ERP/PDV) para "Abrir o sistema". */
-export const ERP_APP_URL = process.env.NEXT_PUBLIC_ERP_APP_URL ?? 'http://localhost:3002';
+export const ERP_APP_URL = process.env.NEXT_PUBLIC_ERP_APP_URL ?? '';
 
 export const brl = (value: number): string =>
   `R$ ${value.toLocaleString('pt-BR', {
