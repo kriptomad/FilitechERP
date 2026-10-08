@@ -1,0 +1,49 @@
+{
+  "$schema": "BIBLE_ENGINEERING_V2.md — Cap. 2.3/2.5/9.3 — Pricing & Modules Catalog",
+  "basePlans": [
+    {
+      "code": "BASIC",
+      "label": "Essencial",
+      "basePrice": 89.9,
+      "currency": "BRL",
+      "billingCycle": "MONTHLY",
+      "includedModules": ["pdv", "estoque", "financeiro"]
+    },
+    {
+      "code": "PRO",
+      "label": "Profissional",
+      "basePrice": 169.9,
+      "currency": "BRL",
+      "billingCycle": "MONTHLY",
+      "includedModules": ["pdv", "estoque", "financeiro", "crm"]
+    }
+  ],
+  "addonModules": [
+    { "code": "fiscal", "label": "Emissão Fiscal (NFC-e/NFe)", "monthlyPrice": 49.9, "nicheTags": ["ALL"] },
+    { "code": "whatsapp", "label": "Integração WhatsApp", "monthlyPrice": 39.9, "nicheTags": ["ALL"] },
+    { "code": "multi-filial", "label": "Multi-Filial", "monthlyPrice": 59.9, "nicheTags": ["ALL"] },
+    { "code": "work-order", "label": "Assistência Técnica (O.S.)", "monthlyPrice": 69.9, "nicheTags": ["TECH_ASSISTANCE", "AUTOMOTIVE_WORKSHOP", "TIRE_SHOP"] },
+    { "code": "liquor-ledger", "label": "Adega — Conta-Corrente de Cascos", "monthlyPrice": 29.9, "nicheTags": ["BEVERAGE_STORE"] },
+    { "code": "recipe-bom", "label": "Ficha Técnica (Padaria/Confeitaria)", "monthlyPrice": 44.9, "nicheTags": ["BAKERY", "RESTAURANT"] },
+    { "code": "pharmacy-sngpc", "label": "Farmácia — SNGPC/Controlados", "monthlyPrice": 79.9, "nicheTags": ["PHARMACY"] },
+    { "code": "restaurant-pos", "label": "Restaurante (Comanda + KDS)", "monthlyPrice": 74.9, "nicheTags": ["RESTAURANT"] },
+    { "code": "petshop", "label": "Petshop/Veterinária", "monthlyPrice": 54.9, "nicheTags": ["PETSHOP"] },
+    { "code": "beauty-salon", "label": "Salão/Barbearia", "monthlyPrice": 54.9, "nicheTags": ["BEAUTY_SALON"] },
+    { "code": "automotive", "label": "Setor Automotivo", "monthlyPrice": 64.9, "nicheTags": ["AUTOMOTIVE_WORKSHOP", "TIRE_SHOP", "CAR_DETAILING", "USED_CAR_DEALERSHIP"] }
+  ],
+  "combos": [
+    { "code": "COMBO_MERCADO_PRO", "label": "Combo Mercado Pro", "includes": ["BASIC", "fiscal", "whatsapp"], "discountPercent": 12 },
+    { "code": "COMBO_ASSISTENCIA_PRO", "label": "Combo Assistência Técnica Pro", "includes": ["BASIC", "work-order", "whatsapp", "fiscal"], "discountPercent": 15 },
+    { "code": "COMBO_ADEGA_PRO", "label": "Combo Adega Pro", "includes": ["BASIC", "liquor-ledger", "fiscal"], "discountPercent": 10 },
+    { "code": "COMBO_PADARIA_PRO", "label": "Combo Padaria Pro", "includes": ["PRO", "recipe-bom", "fiscal"], "discountPercent": 15 },
+    { "code": "COMBO_FARMACIA_PRO", "label": "Combo Farmácia Pro", "includes": ["PRO", "pharmacy-sngpc", "fiscal", "whatsapp"], "discountPercent": 18 }
+  ],
+  "tierFreeLimits": {
+    "monthlySales": 100,
+    "users": 1,
+    "products": 200,
+    "fiscalEmission": false,
+    "storageMB": 500,
+    "support": "community"
+  }
+}

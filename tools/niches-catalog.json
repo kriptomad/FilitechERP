@@ -1,0 +1,61 @@
+{
+  "$schema": "BIBLE_ENGINEERING_V2.md — Cap. 4/11 — 18 Niches & Business Rules",
+  "founders": [
+    {
+      "id": "MARKET",
+      "name": "Mercado/Conveniência",
+      "keyFeatures": ["gaveta-cega", "curva-abc", "alerta-validade", "balanca-serial"],
+      "modules": ["BASIC", "fiscal"]
+    },
+    {
+      "id": "TECH_ASSISTANCE",
+      "name": "Assistência Técnica",
+      "keyFeatures": ["checklist-assinado", "orcamento-validade", "aprovacao-whatsapp", "comissionamento-tecnico"],
+      "modules": ["BASIC", "work-order", "whatsapp"]
+    },
+    {
+      "id": "BEVERAGE_STORE",
+      "name": "Adega/Bebidas",
+      "keyFeatures": ["conta-corrente-cascos", "precificacao-cascata", "devolucao-vasilhame"],
+      "modules": ["BASIC", "liquor-ledger"]
+    },
+    {
+      "id": "BAKERY",
+      "name": "Padaria/Confeitaria",
+      "keyFeatures": ["ficha-tecnica-cmv", "producao-diaria", "perdas-quebras"],
+      "modules": ["PRO", "recipe-bom"]
+    },
+    {
+      "id": "PHARMACY",
+      "name": "Farmácia/Drogaria",
+      "keyFeatures": ["sngpc", "sncr", "retencao-receita", "fefo-lote-validade"],
+      "modules": ["PRO", "pharmacy-sngpc"]
+    },
+    {
+      "id": "GENERAL_RETAIL",
+      "name": "Varejo Geral",
+      "keyFeatures": ["crediario-fiado", "devolucao", "grade-cor-tamanho"],
+      "modules": ["PRO"]
+    }
+  ],
+  "expansion": [
+    { "id": "RESTAURANT", "name": "Lanchonete/Restaurante", "keyFeatures": ["comanda-eletronica", "kds", "ifood-webhook", "multi-canal"], "modules": ["restaurant-pos", "recipe-bom"] },
+    { "id": "OPTICAL", "name": "Ótica", "keyFeatures": ["receita-grau", "pedido-laboratorio", "consignacao-armacao", "convenios"], "modules": ["BASIC", "fiscal"] },
+    { "id": "PETSHOP", "name": "Petshop/Veterinária", "keyFeatures": ["prontuario-pet", "vacinacao-lembrete", "agendamento", "fracionamento-racao"], "modules": ["petshop"] },
+    { "id": "FASHION", "name": "Loja de Roupas/Moda", "keyFeatures": ["grade-colecao", "provador", "trocas-variante", "abc-variante"], "modules": ["BASIC"] },
+    { "id": "STATIONERY", "name": "Papelaria/Presentes", "keyFeatures": ["sazonalidade", "kits", "personalizacao", "pos-sazonalidade"], "modules": ["BASIC"] },
+    { "id": "BEAUTY_SALON", "name": "Salão de Beleza/Barbearia", "keyFeatures": ["agenda-profissional", "comissionamento-servico", "comanda", "pacotes"], "modules": ["beauty-salon"] },
+    { "id": "FOOTWEAR", "name": "Loja de Calçados", "keyFeatures": ["grade-numeracao", "reposicao-giro", "trocas-numeracao"], "modules": ["BASIC"] },
+    { "id": "CONSTRUCTION", "name": "Material de Construção/Ferragens", "keyFeatures": ["compra-vs-venda", "fracionamento", "desconto-progressivo", "prazo-profissional"], "modules": ["BASIC"] },
+    { "id": "AUTOMOTIVE_WORKSHOP", "name": "Oficina Mecânica/Autoelétrica", "keyFeatures": ["cadastro-veiculo", "ciclo-os", "pecas-mao-de-obra"], "modules": ["automotive", "work-order"] },
+    { "id": "TIRE_SHOP", "name": "Loja de Pneus", "keyFeatures": ["estoque-medida", "servicos-vinculados", "garantia-fabricante"], "modules": ["automotive"] },
+    { "id": "CAR_DETAILING", "name": "Estética Automotiva/Lava-Rápido", "keyFeatures": ["fila-agendamento", "pacotes-mensalidade", "comissionamento"], "modules": ["automotive"] },
+    { "id": "USED_CAR_DEALERSHIP", "name": "Loja de Veículos Seminovos", "keyFeatures": ["estoque-chassi", "consignacao", "documentacao", "publicacao-portais"], "modules": ["automotive"] }
+  ],
+  "moduleCodesForSeeding": [
+    "RESTAURANT_POS", "OPTICAL_LAB", "PETSHOP_SCHEDULING", "FASHION_GRID",
+    "STATIONERY_SEASONAL", "BEAUTY_SALON_BOOKING", "FOOTWEAR_GRID",
+    "HARDWARE_FRACTIONAL_SALE", "AUTOMOTIVE_WORKSHOP", "TIRE_SHOP",
+    "CAR_DETAILING", "USED_CAR_DEALERSHIP"
+  ]
+}

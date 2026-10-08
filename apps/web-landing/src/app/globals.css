@@ -1,0 +1,70 @@
+/* src/app/globals.css — Tailwind + design system "Dark Premium" (Cap. 2.2) */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  font-family: 'Inter', 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+  background-color: #05060a;
+  color: #f4f4f5;
+}
+
+/* Seleção no tema dark */
+::selection {
+  background: rgba(99, 102, 241, 0.35);
+  color: #fff;
+}
+
+/* Scrollbar discreta */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(63, 63, 70, 0.7);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(82, 82, 91, 0.9);
+  background-clip: padding-box;
+}
+
+@layer components {
+  /* Vidro (transparência/backdrop) — usado em navbar, cards e painéis */
+  .glass {
+    @apply border border-white/10 bg-white/[0.03] backdrop-blur-xl;
+  }
+
+  .glass-strong {
+    @apply border border-white/10 bg-zinc-950/70 backdrop-blur-2xl;
+  }
+
+  /* Card padrão da vitrine */
+  .card-site {
+    @apply rounded-2xl border border-white/10 bg-zinc-900/40 backdrop-blur-sm;
+  }
+
+  /* Texto secundário consistente */
+  .text-muted {
+    @apply text-zinc-400;
+  }
+
+  /* Brilho indigo (foco/CTA) */
+  .glow-indigo {
+    box-shadow: 0 0 40px rgba(99, 102, 241, 0.35);
+  }
+}

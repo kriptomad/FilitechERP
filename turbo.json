@@ -1,0 +1,41 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "build/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "env": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "JWT_PRIVATE_KEY_PATH",
+        "JWT_PUBLIC_KEY_PATH",
+        "PORT",
+        "NEXT_PUBLIC_APP_URL"
+      ]
+    },
+    "lint": {},
+    "test": {
+      "dependsOn": ["^build"],
+      "env": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "JWT_PRIVATE_KEY_PATH",
+        "JWT_PUBLIC_KEY_PATH"
+      ]
+    },
+    "db:generate": {},
+    "db:migrate": {
+      "env": ["DATABASE_URL"]
+    },
+    "db:push": {
+      "env": ["DATABASE_URL"]
+    },
+    "db:studio": {
+      "env": ["DATABASE_URL"]
+    }
+  }
+}

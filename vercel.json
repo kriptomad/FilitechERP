@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "frontend": {
+    "framework": "nextjs",
+    "origin": "./apps/web-landing",
+    "buildCommand": "next build",
+    "devCommand": "next dev -p 3000",
+    "port": 3000
+  },
+  "functions": {
+    "./apps/api/src/entry.server.ts": {
+      "runtime": "nodejs20.x",
+      "region": "auto"
+    }
+  },
+  "routes": [
+    {
+      "source": "/(.*)",
+      "destination": "/apps/web-landing/$1"
+    }
+  ],
+  "environment": {
+    "NODE_ENV": "production",
+    "PORT": "3000"
+  }
+}
