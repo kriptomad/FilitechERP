@@ -2,13 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
 
-  "//buildCommand": "Necessário porque o projeto é um monorepo: o `pnpm build` da raiz roda `turbo run build`, que compila os três workspaces. Sem este comando explícito a Vercel assume o build do pacote da raiz, que não tem código de aplicação.",
   "buildCommand": "pnpm --filter @filitech/web-landing build",
-
-  "//installCommand": "pnpm install na raiz resolve o workspace inteiro (web-landing + @filitech/db, de onde vem o schema do Prisma).",
   "installCommand": "pnpm install",
 
-  "//crons": "Substituem o BullMQ + scheduler do Cap. 3.4/10.3. Worker de processo longo não existe em serverless; a Vercel Cron invoca as rotas /api/cron/* por HTTP, que é o modelo correto para esta plataforma.",
   "crons": [
     {
       "path": "/api/cron/dunning",
@@ -20,7 +16,6 @@
     }
   ],
 
-  "//functions": "argon2 é binário nativo; sem isto o empacotador tenta bundlá-lo e a build falha em Linux.",
   "functions": {
     "apps/web-landing/src/app/api/**/*.ts": {
       "memory": 1024,
@@ -28,7 +23,6 @@
     }
   },
 
-  "//headers": "Resposta de API nunca é cacheada pelo CDN. Sem isso, um `GET /api/auth/me` bem-sucedido poderia ser servido do cache para um visitante sem sessão — vazamento de estado autenticado.",
   "headers": [
     {
       "source": "/api/(.*)",
