@@ -1,7 +1,5 @@
 'use client';
-// src/app/(marketing)/_components/niche-showcase-section.tsx — Cap. 2.2 (Simplificado sem GSAP)
-
-import { useEffect, useRef } from 'react';
+// src/app/(marketing)/_components/niche-showcase-section.tsx — Versão estática garantida
 
 const NICHES = [
   { name: 'Mercado', color: '#6366F1' },
@@ -25,33 +23,8 @@ const NICHES = [
 ];
 
 export function NicheShowcaseSection() {
-  const sectionRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    // Simple intersection observer for fade-in (sem GSAP)
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('animate-fade-in-up');
-            observer.unobserve(entry.target);
-          }
-        });
-      },
-      { threshold: 0.1, rootMargin: '0px 0px -50px 0px' }
-    );
-
-    const cards = sectionRef.current?.querySelectorAll('.niche-card');
-    cards?.forEach((card, index) => {
-      (card as HTMLElement).style.transitionDelay = `${index * 80}ms`;
-      observer.observe(card);
-    });
-
-    return () => observer.disconnect();
-  }, []);
-
   return (
-    <section id="nichos" ref={sectionRef} className="border-b border-white/5 px-5 py-24 lg:px-8">
+    <section id="nichos" className="border-b border-white/5 px-5 py-24 lg:px-8">
       <div className="mx-auto max-w-7xl">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400">
           18 nichos, 1 motor
@@ -67,8 +40,8 @@ export function NicheShowcaseSection() {
           {NICHES.map((niche) => (
             <div
               key={niche.name}
-              className="niche-card rounded-2xl border p-5 bg-zinc-900/40 backdrop-blur-sm
-                         transition-all duration-300 hover:scale-105 cursor-default opacity-0 animate-none"
+              className="rounded-2xl border p-5 bg-zinc-900/40 backdrop-blur-sm
+                         transition-all duration-300 hover:scale-105 cursor-default"
               style={{ borderColor: `${niche.color}33` }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.boxShadow = `0 0 40px ${niche.color}33`;
