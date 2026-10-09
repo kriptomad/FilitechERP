@@ -13,9 +13,7 @@ import {
   ERP_APP_URL,
   api,
   brl,
-  clearToken,
   del,
-  getToken,
   patch,
   post,
 } from '../../../lib/api';
@@ -477,10 +475,6 @@ export function PainelView() {
   }, [loadAll]);
 
   useEffect(() => {
-    if (!getToken()) {
-      setStatus('anon');
-      return;
-    }
     void refreshSession();
   }, [refreshSession]);
 
@@ -889,11 +883,14 @@ export function PainelView() {
           </a>
           <button
             type="button"
-            onClick={() => {
-              clearToken();
-              setStatus('anon');
-              setMe(null);
-              setSub(null);
+            onClick={async () => {
+              try {
+                await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+              } finally {
+                setStatus('anon');
+                setMe(null);
+                setSub(null);
+              }
             }}
             className="rounded-xl border border-white/10 px-4 py-2.5 text-sm text-zinc-400 transition hover:border-rose-500/40 hover:text-rose-300"
           >

@@ -1,28 +1,4 @@
-// src/lib/api.ts — cliente HTTP do site (proxy same-origin via next.config rewrites)
-// Sessão: mesmo token RS256 do ERP (localStorage `filitech.accessToken`).
-
-const TOKEN_KEY = 'filitech.accessToken';
-
-export function getToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken(): void {
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* ignora */
-  }
-}
+// src/lib/api.ts — cliente HTTP do site (same-origin, cookies HTTP-only)
 
 export interface ApiEnvelope<T> {
   success: boolean;
@@ -46,19 +22,21 @@ export class ApiError extends Error {
   }
 }
 
-/** GET/POST autenticado ao proxy /api/* da própria origem. */
+/** GET/POST autenticado via cookies HTTP-only (same-origin). */
 export async function api<T = unknown>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const token = getToken();
   const headers = new Headers(init.headers);
-  if (token) headers.set('Authorization', `Bearer ${token}`);
   if (init.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(path, { ...init, headers });
+  const res = await fetch(path, { 
+    ...init, 
+    headers,
+    credentials: 'include', // Envia cookies HTTP-only automaticamente
+  });
   const json = (await res.json().catch(() => null)) as ApiEnvelope<T> | null;
 
   if (!res.ok || !json?.success) {

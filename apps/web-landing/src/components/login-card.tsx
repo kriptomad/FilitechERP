@@ -1,9 +1,9 @@
 'use client';
 // src/components/login-card.tsx — login compacto compartilhado
-// (usado em /checkout e /painel). Grava o token RS256 no localStorage.
+// Usa cookies HTTP-only (setados pela API), não localStorage.
 
 import { useState } from 'react';
-import { post, setToken, ApiError } from '../lib/api';
+import { post, ApiError } from '../lib/api';
 
 interface LoginResponse {
   accessToken: string;
@@ -26,11 +26,10 @@ export function LoginCard({
     setError(null);
     setLoading(true);
     try {
-      const data = await post<LoginResponse>('/api/auth/login', {
+      await post<LoginResponse>('/api/auth/login', {
         email,
         password,
       });
-      setToken(data.accessToken);
       onSuccess();
     } catch (err) {
       setError(

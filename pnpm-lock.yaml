@@ -169,18 +169,27 @@ importers:
       '@gsap/react':
         specifier: ^2.1.0
         version: 2.1.2(gsap@3.15.0)(react@18.3.1)
+      '@prisma/client':
+        specifier: ^5.16.0
+        version: 5.22.0(prisma@5.22.0)
       '@react-three/drei':
         specifier: ^9.105.0
         version: 9.122.0(@react-three/fiber@8.18.0(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(three@0.164.1))(@types/react@18.3.31)(@types/three@0.164.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(three@0.164.1)(use-sync-external-store@1.7.0(react@18.3.1))
       '@react-three/fiber':
         specifier: ^8.16.0
         version: 8.18.0(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(three@0.164.1)
+      argon2:
+        specifier: ^0.41.0
+        version: 0.41.1
       framer-motion:
         specifier: ^11.2.0
         version: 11.18.2(@emotion/is-prop-valid@1.4.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       gsap:
         specifier: ^3.12.5
         version: 3.15.0
+      jose:
+        specifier: ^5.6.3
+        version: 5.10.0
       next:
         specifier: ^14.2.0
         version: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -193,6 +202,9 @@ importers:
       three:
         specifier: ^0.164.0
         version: 0.164.1
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
       '@types/react':
         specifier: ^18.3.0
@@ -215,9 +227,15 @@ importers:
       postcss:
         specifier: ^8.4.39
         version: 8.5.29
+      prisma:
+        specifier: ^5.16.0
+        version: 5.22.0
       tailwindcss:
         specifier: ^3.4.4
         version: 3.4.19(tsx@4.23.15)
+      tsx:
+        specifier: ^4.16.0
+        version: 4.23.15
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
@@ -2847,6 +2865,9 @@ packages:
   jiti@1.21.7:
     resolution: {integrity: sha512-/imKNG4EbWNrVjoNC/1H5/9GFy+tqjGBHCaSsN+P2RnPqjsLmv6UD3Ej+Kj8nBWaRAwyk7kK5ZUc+OEatnTR3A==}
     hasBin: true
+
+  jose@5.10.0:
+    resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -6909,6 +6930,8 @@ snapshots:
       '@pkgjs/parseargs': 0.11.0
 
   jiti@1.21.7: {}
+
+  jose@5.10.0: {}
 
   js-tokens@4.0.0: {}
 

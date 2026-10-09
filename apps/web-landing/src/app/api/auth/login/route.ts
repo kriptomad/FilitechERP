@@ -1,36 +1,87 @@
-import { NextRequest, NextResponse } from 'next/server';
+// src/app/api/auth/login/route.ts — Cap. 9.2
+//
+// POST /api/auth/login — autentica e abre a sessão em cookie HTTP-only.
+//
+// A versão anterior aceitava apenas `demo@filitech.dev` / `caixa@filitech.dev`
+// de um array hardcoded no próprio arquivo (e o commit mais recente chegou a
+// colocar o cadastro no MESMO endpoint). Por isso "login não funcionava": não
+// havia consulta ao banco, apenas dois usuários fictícios em memória.
+import { NextResponse } from 'next/server';
+import { prismaUnscoped } from '@/server/db';
+import { jsonError } from '@/server/api-envelope';
+import { attachSessionCookie, createSession } from '@/server/session';
+import { verifyPassword } from '@/server/password';
+import { readJson, requireEmail } from '@/server/request';
+import { requireString } from '@/server/request';
 
-// Simple demo auth - replace with real Prisma/jwt logic later
-const DEMO_USERS = [
-  { email: 'demo@filitech.dev', password: 'Demo@123', role: 'OWNER', tenantId: 'demo-tenant', userId: 'demo-user' },
-  { email: 'caixa@filitech.dev', password: 'Caixa@123', role: 'CASHIER', tenantId: 'demo-tenant', userId: 'caixa-user' },
-];
+export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { email, password } = body;
+interface LoginBody {
+  email?: unknown;
+  password?: unknown;
+}
 
-    const user = DEMO_USERS.find(u => u.email === email && u.password === password);
-    
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: { code: 'INVALID_CREDENTIALS', message: 'E-mail ou senha inválidos.' } },
-        { status: 401 }
-      );
-    }
+export async function POST(request: Request) {
+  const body = await readJson<LoginBody>(request);
+  const email = requireEmail(body.email);
+  const password = requireString(body.password, 'password', { min: 1, max: 200 });
 
-    // In production, generate real JWT here
-    const accessToken = `demo-token-${user.userId}-${Date.now()}`;
+  // Lookup com cliente não-escopado: o login antecede o contexto de tenant.
+  const found = await prismaUnscoped.user.findFirst({
+    where: { email, active: true },
+    include: {
+      tenant: {
+        select: {
+          id: true,
+          slug: true,
+          status: true,
+          tenantModules: {
+            where: { active: true },
+            select: { moduleCode: true },
+          },
+        },
+      },
+    },
+  });
 
-    return NextResponse.json({
-      success: true,
-      data: { accessToken }
-    });
-  } catch {
-    return NextResponse.json(
-      { success: false, error: { code: 'INTERNAL_ERROR', message: 'Erro interno do servidor.' } },
-      { status: 500 }
+  // Mensagem única para e-mail inexistente e senha errada: distinguir os dois
+  // permitiria enumerar contas válidas.
+  const invalid = jsonError(401, 'INVALID_CREDENTIALS', 'E-mail ou senha inválidos.');
+  if (!found) return invalid;
+
+  const valid = await verifyPassword(found.passwordHash, password);
+  if (!valid) return invalid;
+
+  // Bloqueio por inadimplência tem precedência absoluta (Cap. 6.1).
+  if (found.tenant.status === 'SUSPENDED' || found.tenant.status === 'CANCELLED') {
+    return jsonError(
+      402,
+      'TENANT_SUSPENDED',
+      'Assinatura suspensa por inadimplência. Regularize o pagamento para continuar.',
     );
   }
+
+  const { accessToken } = await createSession({
+    userId: found.id,
+    tenantId: found.tenant.id,
+    role: found.role,
+  });
+
+  const response = NextResponse.json({
+    success: true,
+    data: {
+      accessToken,
+      user: {
+        id: found.id,
+        name: found.name,
+        role: found.role,
+        tenantId: found.tenant.id,
+        tenantSubdomain: found.tenant.slug,
+      },
+      activeModules: found.tenant.tenantModules.map((tm) => tm.moduleCode),
+    },
+    error: null,
+  });
+
+  return attachSessionCookie(response, accessToken);
 }

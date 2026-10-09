@@ -1,55 +1,35 @@
-import { NextRequest, NextResponse } from 'next/server';
+// src/app/api/auth/me/route.ts — Cap. 9.2
+//
+// GET /api/auth/me — devolve a sessão atual + módulos ativos.
+// É o que o Gate do app e o painel do site consultam para decidir entre
+// "tela de login", "sem acesso" e "conteúdo".
+import { NextResponse } from 'next/server';
+import { prismaUnscoped } from '@/server/db';
+import { jsonError } from '@/server/api-envelope';
+import { readSession } from '@/server/session';
 
-const DEMO_USERS = [
-  { 
-    email: 'demo@filitech.dev', 
-    password: 'Demo@123', 
-    role: 'OWNER', 
-    tenantId: 'demo-tenant', 
-    userId: 'demo-user',
-    tradeName: 'Filitech Demo',
-    name: 'Demo Owner'
-  },
-  { 
-    email: 'caixa@filitech.dev', 
-    password: 'Caixa@123', 
-    role: 'CASHIER', 
-    tenantId: 'demo-tenant', 
-    userId: 'caixa-user',
-    tradeName: 'Filitech Demo',
-    name: 'Caixa User'
-  },
-];
+export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return NextResponse.json(
-      { success: false, error: { code: 'UNAUTHORIZED', message: 'Token não fornecido.' } },
-      { status: 401 }
-    );
+export async function GET(request: Request) {
+  const session = await readSession(request);
+
+  if (!session) {
+    return jsonError(401, 'UNAUTHENTICATED', 'Sessão ausente ou expirada.');
   }
 
-  const token = authHeader.substring(7);
-  
-  if (token.startsWith('demo-token-')) {
-    const userId = token.split('-')[2];
-    const isCaixa = userId === 'caixa-user';
-    
-    return NextResponse.json({
-      success: true,
-      data: {
-        userId: isCaixa ? 'caixa-user' : 'demo-user',
-        tenantId: 'demo-tenant',
-        role: isCaixa ? 'CASHIER' : 'OWNER',
-        activeModules: ['pdv', 'estoque', 'financeiro'],
-      }
-    });
-  }
+  const tenantModules = await prismaUnscoped.tenantModule.findMany({
+    where: { tenantId: session.tenantId, active: true },
+    select: { moduleCode: true },
+  });
 
-  return NextResponse.json(
-    { success: false, error: { code: 'INVALID_TOKEN', message: 'Token inválido.' } },
-    { status: 401 }
-  );
+  return NextResponse.json({
+    success: true,
+    data: {
+      userId: session.userId,
+      tenantId: session.tenantId,
+      role: session.role,
+      activeModules: tenantModules.map((tm) => tm.moduleCode),
+    },
+    error: null,
+  });
 }

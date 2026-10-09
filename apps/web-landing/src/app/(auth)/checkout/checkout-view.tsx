@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ApiError, brl, clearToken, getToken, post, setToken } from '../../../lib/api';
+import { ApiError, brl, post } from '../../../lib/api';
 import {
   FALLBACK_CATALOG,
   computeBreakdown,
@@ -59,9 +59,17 @@ export function CheckoutView() {
   });
 
   useEffect(() => {
-    setLoggedIn(Boolean(getToken()));
+    // Check auth via /api/auth/me (uses cookies)
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('auth'))))
+      .then((json) => {
+        if (json?.success) setLoggedIn(true);
+        else setLoggedIn(false);
+      })
+      .catch(() => setLoggedIn(false));
+
     let cancelled = false;
-    fetch('/api/billing/catalog')
+    fetch('/api/billing/catalog', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('catalog'))))
       .then((json) => {
         if (!cancelled && json?.success && json.data) setCatalog(json.data);
@@ -89,7 +97,6 @@ export function CheckoutView() {
       router.push('/painel?checkout=sucesso');
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        clearToken();
         setLoggedIn(false);
         setError('Sua sessão expirou. Entre novamente para concluir.');
       } else {
@@ -113,7 +120,7 @@ export function CheckoutView() {
         selectedModuleCodes: moduleCodes,
         billingCycle: cycle,
       });
-      setToken(data.accessToken);
+      // Token is set via HTTP-only cookie by the API
       router.push('/painel?checkout=sucesso');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Falha ao criar a conta.');
@@ -229,7 +236,8 @@ export function CheckoutView() {
                 <button
                   type="button"
                   onClick={() => {
-                    clearToken();
+                    // Clear cookie by calling logout endpoint
+                    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
                     setLoggedIn(false);
                   }}
                   className="text-sm text-zinc-400 underline hover:text-zinc-200"
@@ -397,4 +405,8 @@ export function CheckoutView() {
       </aside>
     </main>
   );
+}
+
+interface SignupResponse {
+  accessToken: string;
 }

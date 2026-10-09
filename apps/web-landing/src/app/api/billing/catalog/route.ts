@@ -1,39 +1,73 @@
-import { NextResponse } from 'next/server';
+// src/app/api/billing/catalog/route.ts — Cap. 2.3 / 2.4 / 2.5
+// Catálogo público da vitrine. Rota pública (a landing renderiza antes do login).
+//
+// A versão anterior devolvia um objeto hardcoded no próprio arquivo — o preço
+// mostrado na vitrine nunca vinha do banco, então um ajuste no painel do dono
+// não afetava a landing. Aqui a fonte é o catálogo real (Plan/Module).
+import { jsonSuccess } from '@/server/api-envelope';
+import { prismaUnscoped } from '@/server/db';
+import {
+  COMBO_DEFS,
+  FREE_LIMITS,
+  PLAN_ORDER,
+  round2,
+} from '@/server/billing-catalog';
 
-const FALLBACK_CATALOG = {
-  plans: [
-    { code: 'FREE', label: 'Free', basePrice: 0, includedModules: ['pdv', 'estoque', 'financeiro'] },
-    { code: 'BASIC', label: 'Essencial', basePrice: 89.9, includedModules: ['pdv', 'estoque', 'financeiro'] },
-    { code: 'PRO', label: 'Profissional', basePrice: 169.9, includedModules: ['pdv', 'estoque', 'financeiro', 'crm'] },
-  ],
-  modules: [
-    { code: 'fiscal', label: 'Emissão Fiscal (NFC-e/NFe)', monthlyPrice: 49.9, description: 'Emissão ilimitada de documentos fiscais com contingência automática.' },
-    { code: 'whatsapp', label: 'Integração WhatsApp', monthlyPrice: 39.9, description: 'Orçamentos, cobranças e notificações de O.S. via WhatsApp.' },
-    { code: 'multi-filial', label: 'Multi-Filial', monthlyPrice: 59.9, description: 'Dashboard consolidado para múltiplas lojas.' },
-    { code: 'work-order', label: 'Assistência Técnica (O.S.)', monthlyPrice: 69.9, description: 'Ordens de serviço, checklist, laudo e IMEI/Serial.' },
-    { code: 'liquor-ledger', label: 'Adega — Conta-Corrente de Cascos', monthlyPrice: 29.9, description: 'Controle de vasilhames retornáveis por cliente.' },
-    { code: 'recipe-bom', label: 'Ficha Técnica (Padaria/Confeitaria)', monthlyPrice: 44.9, description: 'Receitas, custo de produção e baixa automática.' },
-    { code: 'pharmacy-sngpc', label: 'Farmácia — SNGPC/Controlados', monthlyPrice: 79.9, description: 'Escrituração eletrônica e retenção digital de receituário.' },
-    { code: 'restaurant-pos', label: 'Restaurante (Comanda + KDS)', monthlyPrice: 74.9, description: 'Comanda eletrônica, KDS e iFood.' },
-    { code: 'petshop', label: 'Petshop/Veterinária', monthlyPrice: 54.9, description: 'Prontuário do pet, vacinas e agendamento.' },
-    { code: 'beauty-salon', label: 'Salão/Barbearia', monthlyPrice: 54.9, description: 'Agenda por profissional e comissionamento.' },
-    { code: 'automotive', label: 'Setor Automotivo', monthlyPrice: 64.9, description: 'Veículos, O.S. automotiva e peças.' },
-    { code: 'optical', label: 'Ótica', monthlyPrice: 49.9, description: 'Receita de grau, laboratório e consignação.' },
-    { code: 'fashion-grid', label: 'Moda/Calçados (Grade)', monthlyPrice: 39.9, description: 'Grade cor/tamanho/numeração e curva ABC por variante.' },
-    { code: 'stationery-seasonal', label: 'Papelaria (Sazonalidade/Kits)', monthlyPrice: 34.9, description: 'Janelas sazonais e kits compostos.' },
-    { code: 'construction-fractional', label: 'Construção (Venda Fracionada)', monthlyPrice: 44.9, description: 'Compra vs venda, conversão de unidade e desconto progressivo.' },
-  ],
-  combos: [],
-  freeLimits: [
-    { key: 'sales', label: 'Vendas (PDV)', limit: 100, unit: 'vendas/mês', rationale: 'Suficiente para testar a operação real por semanas.' },
-    { key: 'users', label: 'Usuários', limit: 1, unit: 'usuário (Owner)', rationale: 'Upgrade natural assim que o lojista contrata o primeiro funcionário.' },
-    { key: 'products', label: 'Produtos cadastrados', limit: 200, unit: 'SKUs', rationale: 'Cobre um pequeno comércio completo.' },
-    { key: 'fiscal', label: 'Emissão fiscal', limit: 0, unit: 'não incluída', rationale: "Módulo pago 'fiscal' — exigência legal, ponto de conversão natural." },
-    { key: 'storage', label: 'Armazenamento de fotos/XML', limit: 500, unit: 'MB', rationale: 'Operação inicial sem custo de infraestrutura relevante.' },
-    { key: 'support', label: 'Suporte', limit: null, unit: 'Comunidade/FAQ', rationale: 'Suporte prioritário é um upsell dos planos pagos.' },
-  ],
-};
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  return NextResponse.json({ success: true, data: FALLBACK_CATALOG });
+  const [plans, modules] = await Promise.all([
+    prismaUnscoped.plan.findMany({ where: { active: true } }),
+    prismaUnscoped.module.findMany({ where: { active: true } }),
+  ]);
+
+  const planByCode = new Map(plans.map((p) => [p.code, p]));
+  const moduleByCode = new Map(modules.map((m) => [m.code, m]));
+
+  const combos = COMBO_DEFS.map((combo) => {
+    const basePlan = planByCode.get(combo.basePlan);
+    const included = combo.includes
+      .map((code) => moduleByCode.get(code))
+      .filter((m): m is NonNullable<typeof m> => Boolean(m));
+
+    const fullPrice =
+      (basePlan ? Number(basePlan.basePrice) : 0) +
+      included.reduce((sum, m) => sum + Number(m.monthlyPrice), 0);
+    const price = round2(fullPrice * (1 - combo.discountPct / 100));
+
+    return {
+      code: combo.code,
+      label: combo.label,
+      niche: combo.niche,
+      basePlan: combo.basePlan,
+      basePlanLabel: basePlan?.label ?? combo.basePlan,
+      includes: combo.includes,
+      labels: included.map((m) => m.label),
+      discountPct: combo.discountPct,
+      fullPrice: round2(fullPrice),
+      price,
+      savings: round2(fullPrice - price),
+    };
+  });
+
+  const orderedPlans = [...plans].sort(
+    (a, b) => (PLAN_ORDER[a.code] ?? 99) - (PLAN_ORDER[b.code] ?? 99),
+  );
+
+  return jsonSuccess({
+    plans: orderedPlans.map((p) => ({
+      code: p.code,
+      label: p.label,
+      basePrice: Number(p.basePrice),
+      includedModules: p.includedModules,
+    })),
+    modules: modules.map((m) => ({
+      code: m.code,
+      label: m.label,
+      monthlyPrice: Number(m.monthlyPrice),
+      description: m.description,
+    })),
+    combos,
+    freeLimits: FREE_LIMITS,
+  });
 }
