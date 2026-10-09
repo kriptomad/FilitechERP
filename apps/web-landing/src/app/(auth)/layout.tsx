@@ -1,11 +1,7 @@
-// src/app/(auth)/layout.tsx — chrome mínimo para /cadastro e /checkout
+// src/app/(auth)/layout.tsx — chrome mínimo para /cadastro, /checkout e /entrar
 import Link from 'next/link';
 
-export default function AuthLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[#05060A] text-zinc-100">
       <header className="border-b border-white/10">
@@ -18,11 +14,14 @@ export default function AuthLayout({
               Filitech <span className="text-zinc-500">ERP</span>
             </span>
           </Link>
+
+          {/* Link de login sempre presente: era o botão "Entrar" quebrado da
+              navbar que apontava para string vazia quando a env var faltava. */}
           <Link
-            href="/planos"
-            className="text-sm text-zinc-400 transition hover:text-zinc-100"
+            href="/entrar"
+            className="rounded-lg border border-white/10 px-4 py-2 text-sm text-zinc-300 transition hover:bg-white/5"
           >
-            ← Voltar para os planos
+            Entrar
           </Link>
         </div>
       </header>

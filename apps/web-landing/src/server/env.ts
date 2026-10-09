@@ -33,11 +33,21 @@ export const env = {
   get appUrl(): string {
     return optional('NEXT_PUBLIC_APP_URL', 'http://localhost:3000');
   },
+  /** Provedor de pagamento ativo: `mercadopago` | `asaas`. Vazio = sem gateway. */
+  get billingGateway(): string {
+    return optional('BILLING_GATEWAY');
+  },
+  get mercadoPagoAccessToken(): string {
+    return optional('MERCADO_PAGO_ACCESS_TOKEN');
+  },
   get asaasApiKey(): string {
     return optional('ASAAS_API_KEY');
   },
   get asaasWebhookSecret(): string {
     return optional('ASAAS_WEBHOOK_SECRET');
+  },
+  get mercadoPagoWebhookSecret(): string {
+    return optional('MERCADO_PAGO_WEBHOOK_SECRET');
   },
   get stripeSecretKey(): string {
     return optional('STRIPE_SECRET_KEY');

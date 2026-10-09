@@ -5,6 +5,7 @@
 // sessão imediatamente (onboarding sem fricção).
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prismaUnscoped } from '@/server/db';
 import { jsonError, jsonSuccess } from '@/server/api-envelope';
 import { attachSessionCookie, createSession } from '@/server/session';
@@ -30,6 +31,7 @@ interface SignupBody {
   planCode?: unknown;
   selectedModuleCodes?: unknown;
   billingCycle?: unknown;
+  nicheCode?: unknown;
   termsAccepted?: unknown;
   privacyPolicyAccepted?: unknown;
 }
@@ -87,6 +89,21 @@ export async function POST(request: Request) {
     }
   }
 
+  // Nicho (Cap. 1.2.2): define o template de catálogo e os módulos sugeridos.
+  // Sem ele a conta funciona, mas o lojista cai na tela em branco.
+  const nicheCodeInput = optionalString(body.nicheCode, 'nicho', 40);
+  let niche: { code: string; label: string; suggestedModules: string[] } | null = null;
+  if (nicheCodeInput) {
+    const found = await prismaUnscoped.niche.findFirst({
+      where: { code: nicheCodeInput as never, active: true },
+      select: { code: true, label: true, suggestedModules: true },
+    });
+    if (!found) {
+      return jsonError(400, 'INVALID_NICHE', 'Nicho inválido.');
+    }
+    niche = found;
+  }
+
   // Slug único derivado do nome fantasia (Cap. 1.2.1).
   const baseSlug = slugify(tradeName) || 'loja';
   let slug = baseSlug;
@@ -96,8 +113,14 @@ export async function POST(request: Request) {
     slug = `${baseSlug}-${i}`;
   }
 
+  // Módulos sugeridos pelo nicho entram junto do plano, a menos que o cliente
+  // tenha escolhido explicitamente (o que sempre prevalece).
   const activeCodes = Array.from(
-    new Set([...plan.includedModules, ...selectedModuleCodes]),
+    new Set([
+      ...plan.includedModules,
+      ...(niche?.suggestedModules ?? []),
+      ...selectedModuleCodes,
+    ]),
   );
 
   const computedMrr =
@@ -123,12 +146,37 @@ export async function POST(request: Request) {
           // para quem cadastra pela vitrine sem documento na hora.
           cnpj: cnpj ?? `PENDENTE-${randomUUID().slice(0, 12).toUpperCase()}`,
           status: isFree ? 'TRIAL' : 'ACTIVE',
+          nicheCode: niche?.code as never,
         },
       });
 
       const user = await tx.user.create({
         data: { tenantId: tenant.id, name, email, passwordHash, role: 'OWNER' },
       });
+
+      // Template de catálogo do nicho (Cap. 1.2.2): o tenant abre o sistema com
+      // produtos de exemplo já cadastrados, em vez de uma grade vazia.
+      if (niche) {
+        const template = await tx.nicheTemplateProduct.findMany({
+          where: { nicheCode: niche.code as never },
+          orderBy: { sortOrder: 'asc' },
+          take: 12,
+        });
+
+        if (template.length > 0) {
+          await tx.product.createMany({
+            data: template.map((item, index) => ({
+              tenantId: tenant.id,
+              sku: `TPL-${String(index + 1).padStart(3, '0')}`,
+              name: item.name,
+              category: item.category,
+              unitPrice: item.unitPrice,
+              stockQuantity: new Prisma.Decimal(0),
+              active: true,
+            })),
+          });
+        }
+      }
 
       if (activeCodes.length > 0) {
         await tx.tenantModule.createMany({
@@ -195,6 +243,14 @@ export async function POST(request: Request) {
         plan: plan.code,
         subscriptionId: created.subscription.id,
         computedMrr,
+        niche: niche ? { code: niche.code, label: niche.label } : null,
+        // O onboarding usa isto para levar o lojista ao primeiro passo real.
+        onboarding: {
+          nextStep: niche ? 'abrir-caixa' : 'escolher-nicho',
+          message: niche
+            ? `Catálogo inicial de ${niche.label} carregado. Abra o caixa para começar a vender.`
+            : 'Escolha seu nicho para carregar o catálogo inicial.',
+        },
       }),
       { status: 201 },
     );

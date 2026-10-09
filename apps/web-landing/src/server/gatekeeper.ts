@@ -104,13 +104,13 @@ export async function gatekeeper(
       });
 
       if (!tenantModule?.active) {
-        const module = await prismaUnscoped.module.findUnique({
+        const moduleInfo = await prismaUnscoped.module.findUnique({
           where: { code: options.moduleCode },
         });
         const upsell: NonNullable<ApiEnvelope<null>['upsell']> = {
           moduleCode: options.moduleCode,
-          label: module?.label ?? options.moduleCode,
-          price: Number(module?.monthlyPrice ?? 0),
+          label: moduleInfo?.label ?? options.moduleCode,
+          price: Number(moduleInfo?.monthlyPrice ?? 0),
           checkoutUrl: `/checkout?mods=${options.moduleCode}`,
         };
         throw new DomainError(

@@ -6,7 +6,6 @@ import { motion } from 'framer-motion';
 import { Canvas } from '@react-three/fiber';
 import { Float, Environment } from '@react-three/drei';
 import { ErpDeviceMesh } from './erp-device-mesh';
-import { ERP_APP_URL } from '../../../lib/api';
 
 const fadeUpStagger = {
   hidden: { opacity: 0, y: 24 },
@@ -71,13 +70,13 @@ export function HeroSection() {
           >
             Começar grátis
           </Link>
-          <a
-            href={ERP_APP_URL}
+          <Link
+            href="/entrar"
             className="rounded-xl border border-zinc-700 px-8 py-4 text-center font-semibold
                        transition-all hover:border-indigo-400 hover:shadow-[0_0_24px_rgba(99,102,241,0.3)]"
           >
             Ver demonstração
-          </a>
+          </Link>
         </motion.div>
 
         <motion.p

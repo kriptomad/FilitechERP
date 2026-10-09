@@ -1,6 +1,5 @@
 // src/app/(marketing)/_components/footer.tsx — rodapé institucional
 import Link from 'next/link';
-import { ERP_APP_URL } from '../../../lib/api';
 
 const COLUMNS = [
   {
@@ -19,7 +18,7 @@ const COLUMNS = [
       { label: 'Começar grátis', href: '/cadastro' },
       { label: 'Painel de assinatura', href: '/painel' },
       { label: 'Contratar plano', href: '/checkout' },
-      { label: 'Abrir o ERP (login)', href: ERP_APP_URL },
+      { label: 'Entrar no sistema', href: '/entrar' },
     ],
   },
   {

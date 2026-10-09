@@ -11,8 +11,8 @@ import { prismaUnscoped } from '@/server/db';
 import { jsonError } from '@/server/api-envelope';
 import { attachSessionCookie, createSession } from '@/server/session';
 import { verifyPassword } from '@/server/password';
-import { readJson, requireEmail } from '@/server/request';
-import { requireString } from '@/server/request';
+import { handle } from '@/server/handler';
+import { readJson, requireEmail, requireString } from '@/server/request';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +21,7 @@ interface LoginBody {
   password?: unknown;
 }
 
-export async function POST(request: Request) {
+export const POST = handle(async (request: Request) => {
   const body = await readJson<LoginBody>(request);
   const email = requireEmail(body.email);
   const password = requireString(body.password, 'password', { min: 1, max: 200 });
@@ -84,4 +84,4 @@ export async function POST(request: Request) {
   });
 
   return attachSessionCookie(response, accessToken);
-}
+});

@@ -1,0 +1,57 @@
+// src/app/api/auth/2fa/enroll/confirm/route.ts — Cap. 14.2 Passo 2
+import { authenticator } from 'otplib';
+import { prismaUnscoped } from '@/server/db';
+import { readSession } from '@/server/session';
+import { handle } from '@/server/handler';
+import { DomainError } from '@/server/api-envelope';
+
+export const dynamic = 'force-dynamic';
+
+export const POST = handle(async (request: Request) => {
+  const session = await readSession(request);
+  if (!session) throw new DomainError('UNAUTHENTICATED', 'Sessão ausente ou expirada.', 401);
+
+  const body = (await request.json()) as { totpCode?: unknown };
+  const code = typeof body.totpCode === 'string' ? body.totpCode : '';
+
+  if (!code || !/^\d{6}$/.test(code)) {
+    throw new DomainError('VALIDATION_ERROR', 'Código TOTP inválido.');
+  }
+
+  const user = await prismaUnscoped.user.findUnique({ where: { id: session.userId } });
+  if (!user) throw new DomainError('NOT_FOUND', 'Usuário não encontrado.', 404);
+
+  const secretEncrypted = user.totpSecretEncrypted;
+  if (!secretEncrypted) {
+    throw new DomainError('2FA_NOT_STARTED', 'Enrollment de 2FA não foi iniciado.', 400);
+  }
+
+  const secret = Buffer.from(secretEncrypted, 'base64').toString('utf8');
+  const valid = authenticator.verify({ token: code, secret });
+
+  if (!valid) {
+    throw new DomainError('INVALID_2FA_CODE', 'Código inválido. Tente novamente.', 401);
+  }
+
+  // Gera 10 códigos de backup
+  const backupCodes = Array.from({ length: 10 }, () =>
+    Math.random().toString(36).slice(2, 10).toUpperCase(),
+  );
+
+  await prismaUnscoped.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: user.id },
+      data: { totpConfirmedAt: new Date() },
+    });
+
+    await tx.twoFactorBackupCode.deleteMany({ where: { userId: user.id } });
+    await tx.twoFactorBackupCode.createMany({
+      data: backupCodes.map((code) => ({
+        userId: user.id,
+        code,
+      })),
+    });
+  });
+
+  return { backupCodes, message: '2FA ativado com sucesso.' };
+});

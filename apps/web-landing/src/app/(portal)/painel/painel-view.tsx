@@ -23,6 +23,8 @@ import {
   type FreeLimit,
 } from '../../../lib/catalog';
 import { LoginCard } from '../../../components/login-card';
+import { GatewayPanel } from './gateway-panel';
+import { NichePicker } from './niche-picker';
 
 // ── Tipos dos envelopes da API ────────────────────────────────────────────
 interface Me {
@@ -39,6 +41,7 @@ interface SubscriptionData {
     provider: string;
     currentPeriodEnd: string | null;
     pastDueSince: string | null;
+    cancelAtPeriodEnd: boolean;
     createdAt: string;
   } | null;
   plan: {
@@ -52,6 +55,7 @@ interface SubscriptionData {
     legalName: string;
     status: string;
     slug: string;
+    nicheCode: string | null;
     createdAt: string;
   } | null;
   activeModules: string[];
@@ -62,22 +66,43 @@ interface SubscriptionData {
 
 interface UsageData {
   tier: string | null;
+  periodStart: string;
   usage: {
-    sales: { current: number; limit: number };
-    users: { current: number; limit: number };
-    products: { current: number; limit: number };
+    sales: UsageRow;
+    users: UsageRow;
+    products: UsageRow;
   };
   limits: FreeLimit[];
 }
 
+/** `limit` é null quando a trava não se aplica ao módulo (ex.: fiscal no Free). */
+interface UsageRow {
+  current: number;
+  limit: number | null;
+  exceeded?: boolean;
+  percent: number | null;
+}
+
+/**
+ * Cobrança real (PaymentCharge). Antes esta tela listava `BillingEvent`, que é
+ * log de evento — e não tinha valor nem status de pagamento. "Faturas" precisa
+ * mostrar o que foi COBRADO e se foi PAGO.
+ */
 interface Invoice {
   id: string;
   type: string;
+  status: string;
   provider: string;
+  method: string;
+  amount: number;
+  planCode: string | null;
+  moduleCodes: string[];
+  dueDate: string | null;
+  paidAt: string | null;
   createdAt: string;
-  amount: number | null;
-  cycle: string;
   description: string;
+  invoiceUrl: string | null;
+  pixQrCodePayload: string | null;
 }
 
 interface UserRow {
@@ -121,9 +146,10 @@ interface ReceivableRow {
   description: string;
   amount: number;
   dueDate: string;
+  /** O backend já devolve o status efetivo: PENDING vencido chega como OVERDUE. */
   status: string;
-  isOverdue: boolean;
   paidAt: string | null;
+  saleId: string | null;
   createdAt: string;
 }
 
@@ -139,7 +165,6 @@ interface ContractRow {
   startDate: string;
   endDate: string | null;
   signedAt: string | null;
-  pdfUrl: string | null;
   itemCount: number;
   createdAt: string;
 }
@@ -149,17 +174,21 @@ type Tab =
   | 'modulos'
   | 'cobranca'
   | 'faturas'
+  | 'pagamento'
   | 'clientes'
   | 'servicos'
   | 'contratos'
   | 'equipe'
+  | 'nicho'
   | 'empresa';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'visao', label: 'Visão geral' },
+  { key: 'nicho', label: 'Nicho' },
   { key: 'modulos', label: 'Módulos' },
   { key: 'cobranca', label: 'Cobrança' },
   { key: 'faturas', label: 'Faturas' },
+  { key: 'pagamento', label: 'Pagamento' },
   { key: 'clientes', label: 'Clientes' },
   { key: 'servicos', label: 'Serviços' },
   { key: 'contratos', label: 'Contratos' },
@@ -207,9 +236,11 @@ const RECEIVABLE_STATE: Record<string, { label: string; className: string }> = {
   },
 };
 
-/** PENDING com vencimento no passado é exibida como "vencida". */
-const receivableState = (row: ReceivableRow): string =>
-  row.status === 'PENDING' && row.isOverdue ? 'OVERDUE' : row.status;
+/**
+ * O backend resolve o status efetivo na leitura (PENDING com vencimento no
+ * passado já vem como OVERDUE), então aqui basta usar o status como veio.
+ */
+const receivableState = (row: ReceivableRow): string => row.status;
 
 function ReceivableChip({ state }: { state: string }) {
   const cfg = RECEIVABLE_STATE[state] ?? RECEIVABLE_STATE.PENDING;
@@ -331,6 +362,13 @@ function StatCard({
   );
 }
 
+/**
+ * Barra de uso contra um limite do Tier Free.
+ *
+ * `limit` é `number | null`: o backend devolve null quando a trava não se aplica
+ * (ex.: emissão fiscal, que simplesmente não faz parte do Free). Antes o tipo
+ * era `number` fixo e a barra desenhava uma divisão por zero que virava NaN.
+ */
 function UsageBar({
   label,
   current,
@@ -338,10 +376,25 @@ function UsageBar({
 }: {
   label: string;
   current: number;
-  limit: number;
+  limit: number | null;
 }) {
+  // Sem limite aplicável: mostra só o consumo, sem barra.
+  if (limit === null) {
+    return (
+      <div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-zinc-300">{label}</span>
+          <span className="text-zinc-400">{current}</span>
+        </div>
+        <p className="mt-1 text-xs text-zinc-600">Sem trava neste plano</p>
+      </div>
+    );
+  }
+
   const pct = limit > 0 ? Math.min(100, Math.round((current / limit) * 100)) : 0;
-  const almostFull = pct >= 80;
+  const exceeded = current > limit;
+  const almostFull = exceeded || pct >= 80;
+
   return (
     <div>
       <div className="flex items-center justify-between text-sm">
@@ -352,10 +405,15 @@ function UsageBar({
       </div>
       <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-zinc-800">
         <div
-          className={`h-full rounded-full transition-all ${almostFull ? 'bg-amber-500' : 'bg-indigo-500'}`}
-          style={{ width: `${pct}%` }}
+          className={`h-full rounded-full transition-all ${
+            exceeded ? 'bg-rose-500' : almostFull ? 'bg-amber-500' : 'bg-indigo-500'
+          }`}
+          style={{ width: `${Math.max(pct, current > 0 ? 4 : 0)}%` }}
         />
       </div>
+      {exceeded && (
+        <p className="mt-1 text-xs text-rose-400">Limite do plano Free ultrapassado.</p>
+      )}
     </div>
   );
 }
@@ -780,15 +838,17 @@ export function PainelView() {
     }
   }
 
-  async function generateContractPdf(id: string) {
-    try {
-      const data = await post<{ pdfUrl: string }>(`/api/contracts/${id}/pdf`, {});
-      notify('ok', 'PDF gerado.');
-      if (data.pdfUrl) window.open(data.pdfUrl, '_blank');
-      await loadAll();
-    } catch (err) {
-      notify('err', err instanceof ApiError ? err.message : 'Falha ao gerar o PDF.');
-    }
+  /**
+   * Abre o PDF do contrato em nova aba.
+   *
+   * Antes isto chamava `POST /api/contracts/{id}/pdf` e recebia um `pdfUrl` —
+   * que era uma URL para um endpoint que NÃO EXISTIA. O navegador abria e dava
+   * 404. Agora o endpoint devolve o PDF renderizado de verdade; basta abrir a
+   * rota em GET.
+   */
+  function openContractPdf(id: string, contractNumber: string) {
+    window.open(`/api/contracts/${id}/pdf`, '_blank', 'noopener');
+    notify('ok', `Abrindo o PDF do contrato ${contractNumber}.`);
   }
 
   // ── Anônimo ────────────────────────────────────────────────────────────
@@ -1495,10 +1555,11 @@ export function PainelView() {
           {/* ── FATURAS ── */}
           {tab === 'faturas' && (
             <div>
-              <h2 className="text-lg font-semibold">Faturas e eventos de cobrança</h2>
+              <h2 className="text-lg font-semibold">Faturas da sua assinatura</h2>
               <p className="mt-1 text-sm text-zinc-500">
-                Extrato completo da sua assinatura Filitech — tudo que afetou (ou
-                afetará) o seu valor mensal. Para cobrar seus clientes, use a aba{' '}
+                Cada cobrança gerada pelo checkout, com o status real de pagamento.
+                Assinatura só é ativada quando o provedor confirma. Para cobrar
+                SEUS clientes, use a aba{' '}
                 <button
                   type="button"
                   onClick={() => setTab('cobranca')}
@@ -1511,9 +1572,8 @@ export function PainelView() {
 
               {invoices.length === 0 ? (
                 <div className="mt-5 rounded-xl border border-white/10 bg-zinc-900/40 p-8 text-center text-sm text-zinc-500">
-                  Nenhuma fatura ainda. Eventos de cobrança — contratação,
-                  ativação/desativação de módulo — aparecem aqui assim que
-                  ocorrerem.
+                  Nenhuma cobrança ainda. Assim que você contratar um plano pago, a
+                  cobrança aparece aqui com QR Code e status.
                 </div>
               ) : (
                 <div className="mt-5 overflow-x-auto rounded-xl border border-white/10">
@@ -1523,7 +1583,9 @@ export function PainelView() {
                         <th className="px-4 py-3 font-medium">Data</th>
                         <th className="px-4 py-3 font-medium">Descrição</th>
                         <th className="px-4 py-3 font-medium">Valor</th>
-                        <th className="px-4 py-3 font-medium">Origem</th>
+                        <th className="px-4 py-3 font-medium">Status</th>
+                        <th className="px-4 py-3 font-medium">Pago em</th>
+                        <th className="px-4 py-3 font-medium">Provedor</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -1534,9 +1596,31 @@ export function PainelView() {
                           </td>
                           <td className="px-4 py-3 text-zinc-200">
                             {inv.description}
+                            {inv.moduleCodes.length > 0 && (
+                              <span className="mt-0.5 block text-xs text-zinc-500">
+                                +{inv.moduleCodes.length} módulo
+                                {inv.moduleCodes.length === 1 ? '' : 's'}
+                              </span>
+                            )}
                           </td>
                           <td className="whitespace-nowrap px-4 py-3 font-medium text-zinc-100">
-                            {inv.amount === null ? '—' : brl(inv.amount)}
+                            {brl(inv.amount)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                                inv.status === 'PAID'
+                                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                                  : inv.status === 'PENDING'
+                                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                                    : 'border-white/10 bg-white/5 text-zinc-400'
+                              }`}
+                            >
+                              {inv.status.toLowerCase()}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-zinc-400">
+                            {fmtDate(inv.paidAt)}
                           </td>
                           <td className="px-4 py-3 text-xs uppercase text-zinc-500">
                             {inv.provider}
@@ -1547,6 +1631,20 @@ export function PainelView() {
                   </table>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── PAGAMENTO (gateway) ── */}
+          {tab === 'pagamento' && (
+            <div>
+              <h2 className="text-lg font-semibold">Provedor de pagamento</h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                Status da cobrança da sua assinatura e instruções para configurar a
+                integração.
+              </p>
+              <div className="mt-6">
+                <GatewayPanel />
+              </div>
             </div>
           )}
 
@@ -2253,7 +2351,7 @@ export function PainelView() {
                               )}
                               <button
                                 type="button"
-                                onClick={() => generateContractPdf(contract.id)}
+                                onClick={() => openContractPdf(contract.id, contract.contractNumber)}
                                 className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-300 transition hover:bg-indigo-500/20"
                               >
                                 PDF
@@ -2385,6 +2483,20 @@ export function PainelView() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── NICH0 ── */}
+          {tab === 'nicho' && (
+            <div>
+              <h2 className="text-lg font-semibold">Nicho do seu negócio</h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                O nicho define o catálogo inicial e os módulos recomendados para o
+                seu tipo de operação.
+              </p>
+              <div className="mt-6">
+                <NichePicker currentCode={sub?.tenant?.nicheCode ?? null} />
               </div>
             </div>
           )}

@@ -1,8 +1,17 @@
 // src/app/api/billing/checkout/route.ts — Cap. 9.3
 //
-// Sem sessão: devolve o cálculo + URL de onboarding (criação de conta).
-// Com sessão: contrata de fato — cria/atualiza Subscription, ativa os módulos
-// do plano + add-ons, registra BillingEvent e invalida o cache (Cap. 6.1).
+// REGRA INEGOCIÁVEL: este endpoint NÃO ativa nada.
+//
+// O comportamento anterior era: recebia o clique em "Assinar", gravava a
+// Subscription como ACTIVE, ativava os TenantModule e devolvia sucesso — sem
+// consultar PSP, sem QR Code, sem esperar confirmação. O cliente saía do fluxo
+// com tudo liberado sem ter pago nada.
+//
+// Fluxo correto:
+//   1. Calcula o valor (fonte: catálogo real) e devolve o breakdown.
+//   2. Cria a cobrança NO PSP e persiste um PaymentCharge PENDING.
+//   3. Devolve o instrumento de pagamento (QR Code Pix copia-e-cola / link de checkout).
+//   4. O Tenant só é promovido para ACTIVE quando o WEBHOOK do provedor chega.
 import { randomUUID } from 'node:crypto';
 import { prismaUnscoped } from '@/server/db';
 import { DomainError, jsonSuccess } from '@/server/api-envelope';
@@ -12,6 +21,8 @@ import { withTenant } from '@/server/tenant-context';
 import { readSession } from '@/server/session';
 import { round2 } from '@/server/billing-catalog';
 import { absoluteUrl } from '@/server/env';
+import { resolveGateway, gatewayDisplayName } from '@/server/payment/gateway';
+import { activateFreePlan, confirmCharge } from '@/server/payment/confirm-charge';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +39,7 @@ export async function POST(request: Request) {
   const planCode = optionalString(body.planCode, 'planCode', 40) ?? 'BASIC';
   const billingCycle = optionalString(body.billingCycle, 'billingCycle', 20) ?? 'MONTHLY';
   const paymentGateway = optionalString(body.paymentGateway, 'paymentGateway', 20) ?? 'ASAAS';
+  const paymentMethod = (optionalString(body.paymentMethod, 'paymentMethod', 20) ?? 'PIX').toUpperCase() as 'PIX' | 'CREDIT_CARD' | 'BOLETO';
   const selectedModuleCodes = requireStringArray(body.selectedModuleCodes, 'selectedModuleCodes');
 
   const plan = await prismaUnscoped.plan.findUnique({ where: { code: planCode } });
@@ -60,7 +72,7 @@ export async function POST(request: Request) {
 
   const session = await readSession(request);
 
-  // ── Sem sessão: cálculo + onboarding (Cap. 9.3) ─────────────────────────
+  // ── Sem sessão: só simula o cálculo e aponta para o cadastro (Cap. 9.3) ────
   if (!session) {
     const extraCodes = modules
       .filter((m) => !plan.includedModules.includes(m.code))
@@ -80,73 +92,125 @@ export async function POST(request: Request) {
     });
   }
 
-  // ── Com sessão: contratação efetiva ─────────────────────────────────────
-  const tenantId = session.tenantId;
+  // ── Plano gratuito: não há o que cobrar ───────────────────────────────────
+  if (computedMrr === 0) {
+    const subscriptionId = await activateFreePlan(session.tenantId, plan.id);
 
-  const subscriptionId = await withTenant(
-    { tenantId, userId: session.userId, role: session.role },
-    async () => {
-      const existing = await prismaUnscoped.subscription.findFirst({ where: { tenantId } });
+    return jsonSuccess({
+      subscriptionId,
+      computedMrr: 0,
+      billingCycle,
+      breakdown,
+      requiresAccount: false,
+      mode: 'free',
+      message: 'Plano Free ativado.',
+      checkoutRedirectUrl: absoluteUrl('/painel?checkout=sucesso'),
+    });
+  }
 
-      const subscription = existing
-        ? await prismaUnscoped.subscription.update({
-            where: { id: existing.id },
-            data: {
-              planId: plan.id,
-              status: 'ACTIVE',
-              currentPeriodEnd: periodEnd,
-              pastDueSince: null,
-            },
-          })
-        : await prismaUnscoped.subscription.create({
-            data: {
-              tenantId,
-              planId: plan.id,
-              provider: paymentGateway.toLowerCase(),
-              externalSubscriptionId: `sub_${randomUUID()}`,
-              status: 'ACTIVE',
-              currentPeriodEnd: periodEnd,
-            },
-          });
+  // ── Plano pago: exige gateway configurado ─────────────────────────────────
+  const gateway = resolveGateway();
+  if (!gateway) {
+    throw new DomainError(
+      'GATEWAY_NOT_CONFIGURED',
+      'Nenhum provedor de pagamento está configurado. Defina BILLING_GATEWAY e a chave ' +
+        'do provedor (MERCADO_PAGO_ACCESS_TOKEN ou ASAAS_API_KEY) para habilitar a cobrança.',
+      503,
+    );
+  }
 
-      // Ativa módulos do plano + add-ons selecionados.
-      const codesToActivate = [...new Set([...plan.includedModules, ...modules.map((m) => m.code)])];
-      for (const moduleCode of codesToActivate) {
-        await prismaUnscoped.tenantModule.upsert({
-          where: { tenantId_moduleCode: { tenantId, moduleCode } },
-          create: { tenantId, moduleCode, active: true, activatedAt: new Date() },
-          update: { active: true, activatedAt: new Date(), deactivatedAt: null },
-        });
-      }
+  const [tenant, owner] = await Promise.all([
+    prismaUnscoped.tenant.findUnique({
+      where: { id: session.tenantId },
+      select: { id: true, tradeName: true, cnpj: true },
+    }),
+    prismaUnscoped.user.findUnique({
+      where: { id: session.userId },
+      select: { name: true, email: true },
+    }),
+  ]);
 
-      await prismaUnscoped.billingEvent.create({
-        data: {
-          subscriptionId: subscription.id,
-          provider: paymentGateway.toLowerCase(),
-          externalEventKey: `checkout_${randomUUID()}`,
-          type: 'checkout.completed',
-          payload: { computedMrr, billingCycle, breakdown, planCode: plan.code },
-        },
-      });
+  if (!tenant || !owner) {
+    throw new DomainError('TENANT_NOT_FOUND', 'Conta não encontrada.', 404);
+  }
 
-      await prismaUnscoped.tenant.update({
-        where: { id: tenantId },
-        data: { status: 'ACTIVE' },
-      });
+  const description = `Filitech ERP — plano ${plan.label}${
+    selectedModuleCodes.length > 0 ? ` + ${selectedModuleCodes.length} módulo(s)` : ''
+  }`;
 
-      // Invalidação de cache na mesma ação — Cap. 6.1.
-      await invalidateModulesCache(tenantId);
+  // Chamada real ao PSP. Se falhar, nada foi ativado e o erro é propagado.
+  const charge = await gateway.createCharge({
+    tenantId: session.tenantId,
+    customerEmail: owner.email,
+    customerName: owner.name,
+    customerDocument: tenant.cnpj,
+    amount: computedMrr,
+    method: paymentMethod,
+    description,
+    externalReference: session.tenantId,
+  });
 
-      return subscription.id;
+  const paymentCharge = await prismaUnscoped.paymentCharge.create({
+    data: {
+      tenantId: session.tenantId,
+      planCode: plan.code,
+      moduleCodes: selectedModuleCodes,
+      type: 'SUBSCRIPTION',
+      status: charge.status === 'PAID' ? 'PAID' : 'PENDING',
+      amount: computedMrr,
+      provider: gateway.name,
+      externalProviderId: charge.providerChargeId,
+      pixQrCodePayload: charge.pixQrCodePayload ?? null,
+      pixQrCodeBase64: charge.pixQrCodeBase64 ?? null,
+      hostedCheckoutUrl: charge.hostedCheckoutUrl ?? null,
+      dueDate: charge.dueDate ?? new Date(),
+      expiresAt: charge.expiresAt,
+      paidAt: charge.status === 'PAID' ? new Date() : null,
     },
-  );
+  });
+
+  await prismaUnscoped.billingEvent.create({
+    data: {
+      subscriptionId: null,
+      paymentChargeId: paymentCharge.id,
+      provider: gateway.name,
+      externalEventKey: `checkout_${randomUUID()}`,
+      type: 'checkout.pending',
+      payload: { computedMrr, billingCycle, breakdown, planCode: plan.code, paymentMethod },
+    },
+  });
+
+  // Coincidência rara: PSP confirma já na criação. Ainda assim passa por
+  // confirmCharge(), para que existe UM só caminho de ativação.
+  if (charge.status === 'PAID') {
+    await confirmCharge(paymentCharge.id);
+    await invalidateModulesCache(session.tenantId);
+  }
 
   return jsonSuccess({
-    subscriptionId,
+    paymentChargeId: paymentCharge.id,
+    subscriptionId: null,
     computedMrr,
     billingCycle,
     breakdown,
     requiresAccount: false,
-    checkoutRedirectUrl: absoluteUrl('/painel?checkout=sucesso'),
+    mode: 'charge',
+    provider: gateway.name,
+    providerLabel: gatewayDisplayName(),
+    status: paymentCharge.status === 'PAID' ? 'PAID' : 'AWAITING_PAYMENT',
+    payment: {
+      method: paymentMethod,
+      pixQrCodePayload: charge.pixQrCodePayload ?? null,
+      pixQrCodeBase64: charge.pixQrCodeBase64 ?? null,
+      hostedCheckoutUrl: charge.hostedCheckoutUrl ?? null,
+      expiresAt: charge.expiresAt.toISOString(),
+    },
+    message:
+      paymentCharge.status === 'PAID'
+        ? 'Pagamento confirmado. Sua assinatura está ativa.'
+        : 'Cobrança criada. Finalize o pagamento para ativar a assinatura.',
+    checkoutRedirectUrl: absoluteUrl(
+      `/painel?checkout=${paymentCharge.status === 'PAID' ? 'sucesso' : 'pendente'}&charge=${paymentCharge.id}`,
+    ),
   });
 }

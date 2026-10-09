@@ -1,10 +1,9 @@
 // src/server/request.ts — leitura e validação do body das rotas.
 // Sem isso, cada handler repetiria o mesmo `await request.json()` sem
 // tratamento — e JSON malformado estouraria como 500 em vez de 400.
-import type { RequestLike } from './session';
 import { DomainError } from './api-envelope';
 
-export async function readJson<T>(request: RequestLike): Promise<T> {
+export async function readJson<T>(request: Request): Promise<T> {
   try {
     return (await request.json()) as T;
   } catch {
@@ -64,6 +63,15 @@ export function requireEmail(value: unknown): string {
     throw new DomainError('VALIDATION_ERROR', 'E-mail inválido.', 400, { field: 'email' });
   }
   return email;
+}
+
+export function requireNumber(value: unknown, field: string): number {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    throw new DomainError('VALIDATION_ERROR', `Campo "${field}" deve ser numérico.`, 400, {
+      field,
+    });
+  }
+  return value;
 }
 
 export function requireStringArray(value: unknown, field: string): string[] {

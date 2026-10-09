@@ -7,10 +7,11 @@ import { NextResponse } from 'next/server';
 import { prismaUnscoped } from '@/server/db';
 import { jsonError } from '@/server/api-envelope';
 import { readSession } from '@/server/session';
+import { handle } from '@/server/handler';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export const GET = handle(async (request: Request) => {
   const session = await readSession(request);
 
   if (!session) {
@@ -32,4 +33,4 @@ export async function GET(request: Request) {
     },
     error: null,
   });
-}
+});

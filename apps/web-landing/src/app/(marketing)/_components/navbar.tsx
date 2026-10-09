@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ERP_APP_URL } from '../../../lib/api';
 
 const LINKS = [
   { href: '/#recursos', label: 'Recursos' },
@@ -62,12 +61,12 @@ export function Navbar() {
         </div>
 
         <div className="hidden items-center gap-2 md:flex">
-          <a
-            href={ERP_APP_URL}
+          <Link
+            href="/entrar"
             className="rounded-lg px-3 py-2 text-sm text-zinc-300 transition hover:bg-white/5"
           >
             Entrar
-          </a>
+          </Link>
           <Link
             href="/cadastro"
             className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-400"
@@ -114,12 +113,12 @@ export function Navbar() {
                 </Link>
               ))}
               <div className="flex gap-2 pt-3">
-                <a
-                  href={ERP_APP_URL}
+                <Link
+                  href="/entrar"
                   className="flex-1 rounded-lg border border-white/10 px-4 py-2.5 text-center text-sm text-zinc-200"
                 >
                   Entrar
-                </a>
+                </Link>
                 <Link
                   href="/cadastro"
                   onClick={() => setOpen(false)}
