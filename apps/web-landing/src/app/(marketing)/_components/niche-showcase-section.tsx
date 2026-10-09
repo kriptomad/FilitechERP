@@ -1,12 +1,7 @@
 'use client';
-// src/app/(marketing)/_components/niche-showcase-section.tsx — Cap. 2.2 (GSAP + ScrollTrigger)
+// src/app/(marketing)/_components/niche-showcase-section.tsx — Cap. 2.2 (Simplificado sem GSAP)
 
-import { useRef } from 'react';
-import { gsap } from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { useGSAP } from '@gsap/react';
-
-gsap.registerPlugin(ScrollTrigger, useGSAP);
+import { useEffect, useRef } from 'react';
 
 const NICHES = [
   { name: 'Mercado', color: '#6366F1' },
@@ -32,37 +27,28 @@ const NICHES = [
 export function NicheShowcaseSection() {
   const sectionRef = useRef<HTMLDivElement>(null);
 
-  useGSAP(
-    () => {
-      const cards = gsap.utils.toArray<HTMLElement>('.niche-card');
-
-      // Efeito parallax: cada card se move a uma velocidade levemente diferente
-      // conforme a seção é rolada, criando profundidade sem custo de reflow.
-      cards.forEach((card, index) => {
-        gsap.to(card, {
-          yPercent: -15 * (index % 2 === 0 ? 1 : -1),
-          ease: 'none',
-          scrollTrigger: {
-            trigger: sectionRef.current,
-            start: 'top bottom',
-            end: 'bottom top',
-            scrub: 0.6,
-          },
+  useEffect(() => {
+    // Simple intersection observer for fade-in (sem GSAP)
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('animate-fade-in-up');
+            observer.unobserve(entry.target);
+          }
         });
-      });
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -50px 0px' }
+    );
 
-      // Revelação em stagger dos cards ao entrar no viewport.
-      gsap.from(cards, {
-        opacity: 0,
-        y: 60,
-        stagger: 0.08,
-        duration: 0.8,
-        ease: 'power3.out',
-        scrollTrigger: { trigger: sectionRef.current, start: 'top 75%' },
-      });
-    },
-    { scope: sectionRef },
-  );
+    const cards = sectionRef.current?.querySelectorAll('.niche-card');
+    cards?.forEach((card, index) => {
+      (card as HTMLElement).style.transitionDelay = `${index * 80}ms`;
+      observer.observe(card);
+    });
+
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <section id="nichos" ref={sectionRef} className="border-b border-white/5 px-5 py-24 lg:px-8">
@@ -82,12 +68,14 @@ export function NicheShowcaseSection() {
             <div
               key={niche.name}
               className="niche-card rounded-2xl border p-5 bg-zinc-900/40 backdrop-blur-sm
-                         transition-all hover:scale-105 cursor-default"
+                         transition-all duration-300 hover:scale-105 cursor-default opacity-0 animate-none"
               style={{ borderColor: `${niche.color}33` }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.boxShadow = `0 0 40px ${niche.color}33`)
-              }
-              onMouseLeave={(e) => (e.currentTarget.style.boxShadow = 'none')}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow = `0 0 40px ${niche.color}33`;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = 'none';
+              }}
             >
               <h3 className="text-base font-semibold" style={{ color: niche.color }}>
                 {niche.name}

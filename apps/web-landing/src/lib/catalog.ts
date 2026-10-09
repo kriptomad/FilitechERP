@@ -135,6 +135,10 @@ export const FALLBACK_CATALOG: Catalog = {
 
 /** Busca o catálogo na API (server-side). Silenciosamente usa o fallback. */
 export async function fetchCatalog(): Promise<Catalog> {
+  // Se não tem API_URL configurada, usa fallback imediatamente (evita fetch vazio/timeout)
+  if (!API_URL) {
+    return FALLBACK_CATALOG;
+  }
   try {
     const res = await fetch(`${API_URL}/api/billing/catalog`, {
       next: { revalidate: 300 },
