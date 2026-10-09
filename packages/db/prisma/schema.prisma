@@ -23,6 +23,96 @@ enum TenantStatus {
   CANCELLED
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NICHOS (Cap. 11 / 1.2.2) — motor de seleção e personalização
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Nicho de negócio do tenant. Determina o template de catálogo, os módulos
+/// sugeridos e as funcionalidades exibidas na vitrine e no onboarding.
+enum NicheCode {
+  MERCADO
+  ASSISTENCIA_TECNICA
+  ADEGA
+  PADARIA
+  FARMACIA
+  VAREJO_GERAL
+  RESTAURANTE
+  PETSHOP
+  SALAO_BELARIA
+  AUTOMOTIVA
+  OTICA
+  MODA_CALCADOS
+  PAPELARIA
+  CONSTRUCAO
+  ESCRITORIO_CONTABILIDADE
+  PERSONAL
+}
+
+/// Regime tributário real do tenant (Cap. 21.1) — determina a fórmula de
+/// cálculo de imposto aplicada em toda venda, nunca alíquota fixa no código.
+enum TaxRegime {
+  MEI
+  SIMPLES_NACIONAL
+  LUCRO_PRESUMIDO
+  LUCRO_REAL
+}
+
+model Niche {
+  code        NicheCode @id
+  label       String
+  tagline     String
+  description String    @db.Text
+  /// Módulos sugeridos por padrão para este nicho (Cap. 1.2.2 — pré-carrega
+  /// o template em vez de mostrar tela em branco).
+  suggestedModules String[]
+  /// Nichos que o usuário pode escolher durante o cadastro.
+  selectableOnSignup Boolean @default(true)
+  icon       String?
+  colorHex   String?
+  sortOrder  Int        @default(0)
+  active     Boolean    @default(true)
+
+  tenants        Tenant[]
+  features       NicheFeature[]
+  templateItems  NicheTemplateProduct[]
+
+  @@index([active, sortOrder])
+  @@map("niches")
+}
+
+/// Funcionalidade exibida na vitrine ao selecionar um nicho.
+model NicheFeature {
+  id        String    @id @default(uuid())
+  nicheCode NicheCode
+  title     String
+  description String  @db.Text
+  /// Referência ao capítulo da BÍBLIA que especifica a feature.
+  chapterRef String?
+  icon      String?
+  sortOrder Int       @default(0)
+
+  niche Niche @relation(fields: [nicheCode], references: [code], onDelete: Cascade)
+
+  @@index([nicheCode, sortOrder])
+  @@map("niche_features")
+}
+
+/// Produto-exemplo do template que o tenant recebe ao escolher o nicho.
+model NicheTemplateProduct {
+  id        String    @id @default(uuid())
+  nicheCode NicheCode
+  name      String
+  category  String?
+  unitPrice Decimal   @db.Decimal(12, 2)
+  skuPrefix String?
+  sortOrder Int       @default(0)
+
+  niche Niche @relation(fields: [nicheCode], references: [code], onDelete: Cascade)
+
+  @@index([nicheCode, sortOrder])
+  @@map("niche_template_products")
+}
+
 model Tenant {
   id                String       @id @default(uuid())
   parentTenantId    String?
@@ -32,6 +122,16 @@ model Tenant {
   cnpj              String       @unique
   status            TenantStatus @default(TRIAL)
   gracePeriodEndsAt DateTime?
+  // Nicho escolhido no onboarding (Cap. 1.2.2) — determina o template de
+  // catálogo pré-carregado e as funcionalidades exibidas na vitrine.
+  nicheCode         NicheCode?
+  // Regime tributário real (Cap. 21.1) — nunca alíquota fixa hardcoded no código.
+  taxRegime         TaxRegime    @default(SIMPLES_NACIONAL)
+  simplesNacionalAnexo String?
+  inscricaoEstadual String?
+  uf                String?
+  // Faturamento do tenant no mês corrente (consolidado pelo PDV). Base de
+  // cálculo dos limites do Tier Free (Cap. 2.4) e do regime de cobrança.
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
@@ -55,6 +155,7 @@ model Tenant {
   fiscalDocuments   FiscalDocument[]
   accountsPayable   AccountPayable[]
   accountsReceivable AccountReceivable[]
+  paymentCharges    PaymentCharge[]
   returnableLedgerEntries ReturnableContainerLedger[]
   services          Service[]
   appointments      Appointment[]
@@ -73,6 +174,8 @@ model Tenant {
   loyaltyAccounts   LoyaltyAccount[]
   referralCode      ReferralCode?
   referredAs        Referral?         @relation("ReferredTenant")
+  passwordResetTokens PasswordResetToken[]
+  niche             Niche?            @relation(fields: [nicheCode], references: [code])
 
   onlineStoreSettings        OnlineStoreSettings?
   fiscalDocumentEvents       FiscalDocumentEvent[]
@@ -188,6 +291,7 @@ model Subscription {
   tenant                  Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   plan                    Plan               @relation(fields: [planId], references: [id])
   billingEvents           BillingEvent[]
+  paymentCharges          PaymentCharge[]
 
   @@index([tenantId, status])
   @@map("subscriptions")
@@ -195,17 +299,21 @@ model Subscription {
 
 model BillingEvent {
   id               String       @id @default(uuid())
-  subscriptionId   String
+  subscriptionId   String?
+  /// Cobrança avulsa associada (cap. 17.5 / módulo sem assinatura).
+  paymentChargeId  String?
   provider         String
   externalEventKey String
   type             String
   payload          Json
   createdAt        DateTime     @default(now())
 
-  subscription     Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscription     Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  paymentCharge    PaymentCharge? @relation(fields: [paymentChargeId], references: [id], onDelete: Cascade)
 
   @@unique([provider, externalEventKey])
   @@index([subscriptionId, createdAt])
+  @@index([paymentChargeId, createdAt])
   @@map("billing_events")
 }
 
@@ -218,6 +326,10 @@ enum UserRole {
   MANAGER
   TECHNICIAN
   CASHIER
+  // Papel somente-leitura financeiro do Portal do Contador (Cap. 20.9/21.18) —
+  // sem acesso a PDV/estoque/CRM; serve para o escritorio dar entrada nos
+  // documentos fiscais do cliente que o contratou.
+  ACCOUNTANT
 }
 
 model User {
@@ -682,9 +794,12 @@ model OsPhoto {
 // VENDAS, CAIXA E ESTOQUE — Cap. 5
 // ─────────────────────────────────────────────────────────────────────────
 
+/// Status da venda. COMPLETED é o estado normal de uma venda paga na hora —
+/// a distinção importa porque o Cap. 6.6 só considera pagamento CONFIRMED.
 enum SaleStatus {
   OPEN
   PAID
+  COMPLETED
   CANCELLED
   REFUNDED
 }
@@ -821,6 +936,9 @@ model StockMovement {
   productBatchId String?
   type           StockMovementType
   quantity       Decimal            @db.Decimal(12, 3)
+  /// Descrição legível do motivo (ex.: "Venda PDV (FEFO)", "Perda: pães do dia").
+  reason         String?
+  /// Código estruturado do motivo, para relatórios (ex.: "SALE", "EXPIRY").
   reasonCode     String?
   referenceId    String?
   createdAt      DateTime           @default(now())
@@ -902,6 +1020,8 @@ model AccountReceivable {
 
   account                    ChartOfAccount? @relation(fields: [accountId], references: [id], map: "accounts_receivable_account_fkey")
 
+  charge                     PaymentCharge?
+
   @@index([accountId])
   @@index([tenantId, status, dueDate])
   @@index([tenantId, clientId])
@@ -959,6 +1079,7 @@ model Service {
   estimatedDurationMinutes Int
   commissionPercentage   Decimal  @db.Decimal(5, 2) @default(0)
   active                 Boolean  @default(true)
+  createdAt              DateTime @default(now())
 
   tenant                 Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   appointments           Appointment[]
@@ -1385,17 +1506,24 @@ model TwoFactorBackupCode {
   @@map("two_factor_backup_codes")
 }
 
+/// Token de redefinição de senha — Cap. 14.3.
+///
+/// Armazena o SHA-256 do token, nunca o token em si: um dump do banco não pode
+/// permitir redefinição de senha. `usedAt` garante uso único.
 model PasswordResetToken {
   id        String   @id @default(uuid())
+  tenantId  String
   userId    String
-  token     String   @unique
+  tokenHash String   @unique
   usedAt    DateTime?
   expiresAt DateTime
   createdAt DateTime @default(now())
 
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
+  @@index([tenantId, expiresAt])
   @@map("password_reset_tokens")
 }
 
@@ -1595,9 +1723,13 @@ model CashRegisterMovement {
 // COBRANÇA: BOLETO E PIX — Cap. 17.5
 // ─────────────────────────────────────────────────────────────────────────
 
+/// Canal de cobrança — Cap. 2.7 / 17.5. SUBSCRIPTION distingue a cobrança
+/// recorrente de assinatura das cobranças avulsas de serviço.
 enum ChargeType {
   BOLETO
   PIX
+  CREDIT_CARD
+  SUBSCRIPTION
 }
 
 enum ChargeStatus {
@@ -1605,23 +1737,52 @@ enum ChargeStatus {
   PAID
   EXPIRED
   CANCELLED
+  REFUNDED
 }
 
+/// Cobrança real do gateway (Asaas / Mercado Pago / Stripe) — Cap. 2.7 / 9.3.
+///
+/// Gap corrigido: o checkout ativava o Tenant sem NENHUMA confirmação do
+/// provedor (a UI dizia "Assinar" e o cliente já saía com tudo liberado).
+/// Aqui o pagamento é materializado em um Charge próprio, e a Subscription só é
+/// promovida para ACTIVE quando o webhook chega.
 model PaymentCharge {
-  id              String       @id @default(uuid())
-  tenantId        String
-  accountReceivableId String   @unique
-  type            ChargeType
-  status          ChargeStatus @default(PENDING)
-  pixQrCodePayload String?     // payload EMV do QR Code Pix dinâmico
-  boletoDigitableLine String?  // linha digitável, quando aplicável
+  id                 String       @id @default(uuid())
+  tenantId           String
+  /// Vínculo opcional com contas a receber (cobrança avulsa de serviço).
+  accountReceivableId String?     @unique
+  /// Vínculo opcional com a assinatura origem (cobrança de recorrência).
+  subscriptionId     String?
+  /// Snapshot do que foi cobrado: plano e add-ons podem mudar depois.
+  planCode           String?
+  moduleCodes        String[]
+  type               ChargeType
+  status             ChargeStatus @default(PENDING)
+  amount             Decimal      @db.Decimal(12, 2)
+  /// Provedor usado (asaas | mercadopago | stripe) — resolve qual webhook
+  /// processará esta cobrança.
+  provider           String
+  /// ID da cobrança/assinatura no provedor.
+  externalProviderId String?
+  pixQrCodePayload   String?      // payload EMV do QR Code Pix dinâmico
+  pixQrCodeBase64    String?      @db.Text // PNG pronto, evita round-trip ao gateway
+  boletoDigitableLine String?
   boletoPdfStorageKey String?
-  expiresAt       DateTime
-  paidAt          DateTime?
-  externalProviderId String?   // ID da cobrança no PSP (ex.: Asaas, Efí, Mercado Pago)
-  createdAt       DateTime    @default(now())
+  hostedCheckoutUrl  String?      // checkout hospedado (cartão)
+  dueDate            DateTime?
+  expiresAt          DateTime
+  paidAt             DateTime?
+  failureReason      String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  accountReceivable AccountReceivable? @relation(fields: [accountReceivableId], references: [id])
+  subscription      Subscription?     @relation(fields: [subscriptionId], references: [id])
+  billingEvents     BillingEvent[]
 
   @@index([tenantId, status])
+  @@index([provider, externalProviderId])
   @@map("payment_charges")
 }
 
