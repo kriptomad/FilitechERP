@@ -74,11 +74,17 @@ app.use(
   },
 );
 
-const PORT = Number(process.env.PORT ?? 3001);
+// Export para Vercel Serverless Functions
+export default app;
 
-app.listen(PORT, () => {
-  subscribeRedisFanout(); // fanout SSE entre nós (Cap. 8.2)
-  const scheduler = createScheduler();
-  scheduler.start(); // jobs agendados (Cap. 3.4/10.3)
-  logger.info({ port: PORT }, "api_started");
-});
+// Inicialização local (não executa no Vercel)
+if (process.env.VERCEL !== "1") {
+  const PORT = Number(process.env.PORT ?? 3001);
+
+  app.listen(PORT, () => {
+    subscribeRedisFanout(); // fanout SSE entre nós (Cap. 8.2)
+    const scheduler = createScheduler();
+    scheduler.start(); // jobs agendados (Cap. 3.4/10.3)
+    logger.info({ port: PORT }, "api_started");
+  });
+}

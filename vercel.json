@@ -5,11 +5,16 @@
   "devCommand": "pnpm dev",
   "installCommand": "pnpm install",
   "outputDirectory": ".next",
-  "regions": ["iad1"],
-  "rewrites": [
+  "functions": {
+    "apps/api/src/main.ts": {
+      "runtime": "nodejs20.x",
+      "maxDuration": 60
+    }
+  },
+  "routes": [
     {
-      "source": "/api/(.*)",
-      "destination": "https://api.seu-dominio.com/api/$1"
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
     }
   ],
   "env": {

@@ -3,15 +3,17 @@ const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? '';
 
 const nextConfig = {
   reactStrictMode: true,
-  // R3F/three: desabilita otimização agressiva de imagens para assets 3D
   images: { unoptimized: true },
   async rewrites() {
-    // Proxy same-origin /api/* → API Express. Evita CORS entre origens e
-    // mantém o front sempre relativo (dev e produção com o mesmo código).
+    // Em produção no Vercel, as rewrites do vercel.json já cuidam do /api/*
+    // Em dev local, proxy para a API local
+    if (process.env.NODE_ENV === 'production') {
+      return [];
+    }
     return [
       {
         source: "/api/:path*",
-        destination: `${API_URL}/api/:path*`,
+        destination: `${API_URL || 'http://localhost:3001'}/api/:path*`,
       },
     ];
   },
