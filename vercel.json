@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
 
-  "buildCommand": "pnpm --filter @filitech/web-landing build",
+  "buildCommand": "pnpm --filter @filitech/db exec prisma generate && pnpm --filter @filitech/web-landing build",
   "installCommand": "pnpm install",
 
   "crons": [
