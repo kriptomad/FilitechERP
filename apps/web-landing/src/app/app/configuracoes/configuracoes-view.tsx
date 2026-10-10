@@ -1,17 +1,18 @@
 'use client';
 // src/app/app/configuracoes/configuracoes-view.tsx — Cap. 5 / 14.2 / 1.2.2
 //
-// Três abas:
+// Quatro abas:
 //   • Dados fiscais → PATCH /api/tenant/settings (não existia endpoint antes);
 //   • Segurança     → ativação/desativação real do 2FA (Cap. 14.2);
-//   • Nicho         → PATCH /api/auth/niche, que carrega o template de catálogo.
+//   • Nicho         → PATCH /api/auth/niche, que carrega o template de catálogo;
+//   • Fidelidade    → PATCH /api/loyalty, programa de pontos (Cap. 4.1.1).
 //
 // Nenhum valor é presumido aqui: o que está marcado como "ativo" veio do banco
 // na renderização do servidor.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { post, patch, ApiError } from '@/lib/api';
+import { api, post, patch, ApiError } from '@/lib/api';
 
 interface User {
   id: string;
@@ -58,12 +59,13 @@ interface Props {
   subscription: Subscription | null;
 }
 
-type Tab = 'fiscal' | 'seguranca' | 'nicho';
+type Tab = 'fiscal' | 'seguranca' | 'nicho' | 'fidelidade';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'fiscal', label: 'Dados fiscais' },
   { key: 'seguranca', label: 'Segurança' },
   { key: 'nicho', label: 'Nicho do negócio' },
+  { key: 'fidelidade', label: 'Fidelidade' },
 ];
 
 const inputClass =
@@ -149,6 +151,7 @@ export function ConfiguracoesView({
         />
       )}
       {tab === 'nicho' && <NicheTab currentCode={tenant.nicheCode} niches={niches} />}
+      {tab === 'fidelidade' && <LoyaltyTab role={user.role} />}
     </div>
   );
 }
@@ -702,6 +705,238 @@ function NicheTab({
       >
         {busy ? 'Aplicando…' : selected === currentCode ? 'Nicho atual' : 'Aplicar nicho'}
       </button>
+    </div>
+  );
+}
+
+// ─── Fidelidade (Cap. 4.1.1) ────────────────────────────────────────────────
+
+interface LoyaltyProgramView {
+  active: boolean;
+  pointsPerCurrencyUnit: number;
+  redemptionValuePerPoint: number;
+  minPointsToRedeem: number;
+  pointsExpireAfterDays: number | null;
+}
+
+/**
+ * Configuração do programa de pontos.
+ *
+ * O saldo e o histórico NÃO ficam aqui: eles só existem por cliente (a aba
+ * Clientes/PDV). Esta tela cuida da única coisa que é da conta toda — ativar,
+ * quanto vale o ponto e quando ele vence.
+ */
+function LoyaltyTab({ role }: { role: string }) {
+  const [program, setProgram] = useState<LoyaltyProgramView | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+
+  const [active, setActive] = useState(false);
+  const [pointsPerCurrencyUnit, setPerBrl] = useState('1');
+  const [redemptionValuePerPoint, setPointValue] = useState('0.01');
+  const [minPointsToRedeem, setMinRedeem] = useState('100');
+  const [pointsExpireAfterDays, setExpireDays] = useState('');
+
+  const managed = role === 'OWNER' || role === 'MANAGER';
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void api<{ program: LoyaltyProgramView | null }>('/api/loyalty')
+      .then((result) => {
+        if (cancelled) return;
+        const value = result.program;
+        setProgram(value);
+        if (value) {
+          setActive(value.active);
+          setPerBrl(String(value.pointsPerCurrencyUnit));
+          setPointValue(String(value.redemptionValuePerPoint));
+          setMinRedeem(String(value.minPointsToRedeem));
+          setExpireDays(
+            value.pointsExpireAfterDays === null ? '' : String(value.pointsExpireAfterDays),
+          );
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setMessage({
+            tone: 'error',
+            text: err instanceof ApiError ? err.message : 'Falha ao carregar a fidelidade.',
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await patch<LoyaltyProgramView | null>('/api/loyalty', {
+        active,
+        pointsPerCurrencyUnit: Number(pointsPerCurrencyUnit.replace(',', '.')),
+        redemptionValuePerPoint: Number(redemptionValuePerPoint.replace(',', '.')),
+        minPointsToRedeem: Number(minPointsToRedeem),
+        // Vazio = sem validade; limpar a validade depois de haver uma é
+        // uma decisão, então manda null explicitamente (o servidor trata).
+        pointsExpireAfterDays:
+          pointsExpireAfterDays.trim() === '' ? null : Number(pointsExpireAfterDays),
+      });
+      setMessage({
+        tone: 'ok',
+        text: active
+          ? 'Programa ativo: a partir de agora cada venda de cliente identificado pontua no PDV.'
+          : 'Programa salvo e desativado: nenhuma venda pontua até religar.',
+      });
+    } catch (err) {
+      setMessage({
+        tone: 'error',
+        text: err instanceof ApiError ? err.message : 'Não foi possível salvar.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loading) {
+    return <p className="text-sm text-zinc-500">Carregando fidelidade…</p>;
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-2xl border border-white/10 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+              Programa de pontos
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm text-zinc-500">
+              Válido só para venda com cliente identificado. Os pontos nascem dentro da mesma
+              transação da venda, então cancelar a venda desfaz os pontos junto. Resgate é feito no
+              PDV e nunca deixa o saldo negativo.
+            </p>
+          </div>
+          <span
+            className={`rounded px-2.5 py-1 text-[11px] font-medium ${
+              program?.active
+                ? 'bg-emerald-500/15 text-emerald-300'
+                : 'bg-zinc-500/15 text-zinc-400'
+            }`}
+          >
+            {program?.active ? 'ATIVO' : 'INATIVO'}
+          </span>
+        </div>
+
+        <label className="mt-4 flex items-center gap-3 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(e) => setActive(e.target.checked)}
+            disabled={!managed}
+            className="h-4 w-4 rounded border-white/20 bg-zinc-900"
+          />
+          Ativar acúmulo de pontos
+        </label>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <LoyaltyField
+            id="points-per-brl"
+            label="Pontos por R$ 1,00"
+            value={pointsPerCurrencyUnit}
+            onChange={setPerBrl}
+            disabled={!managed}
+          />
+          <LoyaltyField
+            id="point-value"
+            label="Valor de 1 ponto (R$)"
+            value={redemptionValuePerPoint}
+            onChange={setPointValue}
+            disabled={!managed}
+          />
+          <LoyaltyField
+            id="min-redeem"
+            label="Mínimo para resgatar"
+            value={minPointsToRedeem}
+            onChange={setMinRedeem}
+            disabled={!managed}
+          />
+          <LoyaltyField
+            id="expire-days"
+            label="Validade (dias, vazio = sem)"
+            value={pointsExpireAfterDays}
+            onChange={setExpireDays}
+            disabled={!managed}
+          />
+        </div>
+
+        {!managed && (
+          <p className="mt-3 text-xs text-amber-400">
+            Somente OWNER ou MANAGER pode alterar o programa de fidelidade.
+          </p>
+        )}
+
+        {message && (
+          <div className="mt-4">
+            <Notice tone={message.tone}>{message.text}</Notice>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={save}
+          disabled={busy || !managed}
+          className="mt-5 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
+        >
+          {busy ? 'Salvando…' : 'Salvar fidelidade'}
+        </button>
+      </div>
+
+      <div className="rounded-2xl border border-white/10 p-5 text-sm text-zinc-500">
+        <p className="font-medium text-zinc-400">Como o cliente vê</p>
+        <p className="mt-1">
+          O saldo, os pontos a vencer nos próximos 30 dias e o histórico saem de{' '}
+          <code className="text-zinc-300">GET /api/loyalty?clientId=…</code>, que é o mesmo dado
+          que a ficha do cliente e o PDV consultam — não existe contador separado.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function LoyaltyField({
+  id,
+  label,
+  value,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1.5 block text-xs text-zinc-400">
+        {label}
+      </label>
+      <input
+        id={id}
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className={inputClass}
+      />
     </div>
   );
 }

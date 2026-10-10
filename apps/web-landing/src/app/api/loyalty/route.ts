@@ -1,6 +1,7 @@
 // src/app/api/loyalty/route.ts — Cap. 4.1.1
 //
-//   GET   — resumo do cliente (programa, saldo, expirações, histórico).
+//   GET   — configuração do programa; com `?clientId=` também traz saldo,
+//           pontos a vencer e histórico.
 //   PATCH — configuração do programa (OWNER/MANAGER).
 //
 // O programa é opt-in por tenant: sem `LoyaltyProgram` ativo o GET devolve
@@ -24,10 +25,12 @@ export const GET = handle(async (request: Request) => {
   }
 
   const clientId = new URL(request.url).searchParams.get('clientId');
+
+  // Sem `clientId` devolve só a configuração do programa — é o que a tela de
+  // Configurações precisa para mostrar os campos. Com cliente, o saldo e o
+  // histórico entram junto.
   if (!clientId) {
-    throw new DomainError('VALIDATION_ERROR', 'Informe o cliente (clientId).', 400, {
-      field: 'clientId',
-    });
+    return apiSuccess({ program: await getProgram(prismaUnscoped, session.tenantId) });
   }
 
   const summary = await getLoyaltySummary(session.tenantId, clientId);

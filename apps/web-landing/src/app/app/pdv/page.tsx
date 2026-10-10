@@ -25,6 +25,25 @@ interface OpenRegister {
   openingAmount: number;
 }
 
+interface ClientOption {
+  id: string;
+  name: string;
+  document: string | null;
+  phone: string | null;
+}
+
+interface LoyaltyInfo {
+  balance: number;
+  expiringPoints: number;
+  program: {
+    active: boolean;
+    pointsPerCurrencyUnit: number;
+    redemptionValuePerPoint: number;
+    minPointsToRedeem: number;
+    pointsExpireAfterDays: number | null;
+  } | null;
+}
+
 const bzl = (value: number) =>
   `R$ ${Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -41,6 +60,15 @@ export default function PdvPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // ── Cliente da venda ──────────────────────────────────────────────────────
+  // Sem cliente identificado a venda não pontua nem consome crediário: é o
+  // dado que liga o PDV ao CRM e à fidelidade (Cap. 4.1.1 / 4.6).
+  const [clientQuery, setClientQuery] = useState('');
+  const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
+  const [clientSearchBusy, setClientSearchBusy] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<ClientOption | null>(null);
+  const [loyalty, setLoyalty] = useState<LoyaltyInfo | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +94,65 @@ export default function PdvPage() {
       cancelled = true;
     };
   }, []);
+
+  // Busca o cliente enquanto o caixa digita (250 ms de espera para não
+  // consultar o banco a cada tecla).
+  useEffect(() => {
+    const term = clientQuery.trim();
+    if (term.length < 2) {
+      setClientOptions([]);
+      setClientSearchBusy(false);
+      return;
+    }
+
+    let cancelled = false;
+    setClientSearchBusy(true);
+    const timer = setTimeout(() => {
+      void api<{ clients: ClientOption[] }>(`/api/pdv/clients?q=${encodeURIComponent(term)}`)
+        .then((result) => {
+          if (!cancelled) setClientOptions(result.clients);
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setClientOptions([]);
+            setError(err instanceof ApiError ? err.message : 'Falha ao buscar cliente.');
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setClientSearchBusy(false);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [clientQuery]);
+
+  // Saldo de fidelidade do cliente escolhido — só existe quando há cliente.
+  useEffect(() => {
+    if (!selectedClient) {
+      setLoyalty(null);
+      return;
+    }
+
+    let cancelled = false;
+    setLoyalty(null);
+
+    void api<LoyaltyInfo>(`/api/loyalty?clientId=${encodeURIComponent(selectedClient.id)}`)
+      .then((result) => {
+        if (!cancelled) setLoyalty(result);
+      })
+      .catch(() => {
+        // Sem fidelidade contratada a rota ainda responde — mas um 403/404
+        // não pode travar o caixa: o PDV segue vendendo sem pontos.
+        if (!cancelled) setLoyalty(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedClient]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -159,12 +246,19 @@ export default function PdvPage() {
           quantity: i.quantity,
           unitPrice: i.unitPrice,
         })),
+        clientId: selectedClient?.id ?? null,
         paymentMethod,
         amountTendered: paymentMethod === 'CASH' ? tendered : undefined,
       });
       setCart([]);
       setAmountTendered('');
-      setSuccess('Venda registrada com sucesso.');
+      setSelectedClient(null);
+      setClientQuery('');
+      setSuccess(
+        selectedClient
+          ? `Venda registrada para ${selectedClient.name}.`
+          : 'Venda registrada com sucesso.',
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Falha ao registrar a venda.');
     } finally {
@@ -282,7 +376,100 @@ export default function PdvPage() {
           </section>
 
           <aside className="h-fit rounded-2xl border border-white/10 bg-zinc-900/40 p-6 lg:sticky lg:top-24">
-            <h2 className="text-lg font-semibold">Carrinho</h2>
+            {/* Cliente da venda — opcional, mas é ele que faz a venda pontuar
+                e consumir crediário. */}
+            <div>
+              <label htmlFor="pdv-client" className="mb-1.5 block text-sm text-zinc-400">
+                Cliente
+              </label>
+
+              {selectedClient ? (
+                <div className="rounded-xl border border-indigo-500/40 bg-indigo-500/10 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-indigo-200">
+                        {selectedClient.name}
+                      </p>
+                      <p className="truncate text-xs text-indigo-300/70">
+                        {selectedClient.document ?? selectedClient.phone ?? 'sem documento'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedClient(null);
+                        setClientQuery('');
+                      }}
+                      className="shrink-0 text-xs text-indigo-300 underline-offset-2 hover:underline"
+                    >
+                      trocar
+                    </button>
+                  </div>
+
+                  {loyalty?.program?.active && (
+                    <p className="mt-2 border-t border-indigo-400/20 pt-2 text-xs text-indigo-200">
+                      {loyalty.balance} pontos · nesta compra:{' '}
+                      <strong>
+                        {Math.floor(
+                          total * loyalty.program.pointsPerCurrencyUnit,
+                        )}{' '}
+                        pts
+                      </strong>
+                    </p>
+                  )}
+                  {loyalty && loyalty.expiringPoints > 0 && (
+                    <p className="mt-1 text-[11px] text-amber-300">
+                      {loyalty.expiringPoints} pontos vencem em até 30 dias.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <input
+                    id="pdv-client"
+                    type="search"
+                    value={clientQuery}
+                    onChange={(e) => setClientQuery(e.target.value)}
+                    placeholder="Nome, CPF/CNPJ ou telefone"
+                    autoComplete="off"
+                    className="w-full rounded-xl border border-white/10 bg-zinc-900/60 px-3.5 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-indigo-500/70"
+                  />
+
+                  {clientSearchBusy && (
+                    <p className="mt-2 text-xs text-zinc-500">Buscando…</p>
+                  )}
+
+                  {clientOptions.length > 0 && (
+                    <ul className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-white/10 divide-y divide-white/5">
+                      {clientOptions.map((client) => (
+                        <li key={client.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedClient(client);
+                              setClientOptions([]);
+                              setClientQuery('');
+                            }}
+                            className="w-full px-3 py-2 text-left text-sm transition hover:bg-indigo-500/10"
+                          >
+                            <span className="block truncate text-zinc-200">{client.name}</span>
+                            <span className="block truncate text-xs text-zinc-500">
+                              {client.document ?? client.phone ?? ''}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  <p className="mt-2 text-[11px] text-zinc-600">
+                    Venda avulsa não pontua — identifique o cliente para fidelidade e crediário.
+                  </p>
+                </>
+              )}
+            </div>
+
+            <h2 className="mt-6 text-lg font-semibold">Carrinho</h2>
 
             {cart.length === 0 ? (
               <p className="mt-3 text-sm text-zinc-500">Nenhum item adicionado.</p>
