@@ -15,9 +15,47 @@
 // `handle` devolve uma função com a assinatura que o Next espera e preserva o
 // status/código do DomainError.
 import { NextResponse } from 'next/server';
-import { DomainError, jsonError, jsonSuccess } from './api-envelope';
+import { DomainError, jsonError, jsonSuccess, type ApiEnvelope } from './api-envelope';
 
 type AnyRouteHandler = (request: Request, context?: unknown) => unknown | Promise<unknown>;
+
+/**
+ * Reconhece o envelope já montado pelo handler.
+ *
+ * Exige as TRÊS chaves (`success`, `data`, `error`) para não capturar por
+ * engano um payload de negócio que apenas tenha um campo chamado `success`.
+ */
+function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    'success' in value &&
+    'data' in value &&
+    'error' in value
+  );
+}
+
+/** O envelope de erro não carrega status HTTP — ele é derivado do código. */
+function statusForEnvelope(envelope: ApiEnvelope<unknown>): number {
+  if (envelope.success) return 200;
+
+  const code = envelope.error?.code ?? '';
+
+  // Upsell e bloqueios financeiros são sempre 402 (Cap. 2.6 / 6.1): o cliente
+  // precisa distinguir "você pode pagar" de "você foi proibido".
+  if (envelope.upsell || code === 'MODULE_NOT_ACTIVE' || code === 'TENANT_SUSPENDED') {
+    return 402;
+  }
+  if (code === 'UNAUTHENTICATED' || code === 'SESSION_EXPIRED') return 401;
+  if (code === 'FORBIDDEN') return 403;
+  if (code === 'NOT_FOUND' || code.endsWith('_NOT_FOUND')) return 404;
+  if (code === 'DUPLICATED' || code === 'UNIQUE_CONSTRAINT' || code.endsWith('_EXISTS')) {
+    return 409;
+  }
+
+  return 400;
+}
 
 export function handle<A extends unknown[]>(
   fn: (request: Request, ...args: A) => unknown | Promise<unknown>,
@@ -34,6 +72,16 @@ export function handle<A extends unknown[]>(
       // `{success:true,data:<Response>}` e o cliente via `data: {}`.
       if (result instanceof Response) {
         return result as NextResponse;
+      }
+
+      // O handler devolveu o ENVELOPE pronto (`{success, data, error}`) —
+      // forma usada por ~22 rotas. Sem este ramo, `jsonSuccess(result)`
+      // produziria `{success:true, data:{success:true, data:<payload>, ...}}`
+      // e o cliente (que lê `data` no topo) trataria o envelope inteiro como
+      // se fosse a lista/salvamento — tela em branco, `.map is not a function`,
+      // e `success:false` saindo como HTTP 200.
+      if (isApiEnvelope(result)) {
+        return NextResponse.json(result, { status: statusForEnvelope(result) });
       }
 
       // Devolveu JSON puro — embrulha no envelope padrão (Cap. 9.1).

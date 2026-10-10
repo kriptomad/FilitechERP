@@ -7,10 +7,15 @@ import { getActiveModuleCodes } from '@/server/cache';
 import { requireSession } from '@/server/session';
 import { withTenant } from '@/server/tenant-context';
 import { round2 } from '@/server/billing-catalog';
+import { handle } from '@/server/handler';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+// `handle()` é obrigatório aqui: `requireSession` lança DomainError para quem
+// está sem sessão, e fora do wrapper o Next devolvia 500 (com stack em dev) em
+// vez de 401 — a tela de faturamento mostrava "erro interno" para um problema
+// de sessão expirada.
+export const GET = handle(async (request: Request) => {
   const session = await requireSession(request);
   const { tenantId } = session;
 
@@ -92,4 +97,4 @@ export async function GET(request: Request) {
       payload: e.payload,
     })),
   });
-}
+});

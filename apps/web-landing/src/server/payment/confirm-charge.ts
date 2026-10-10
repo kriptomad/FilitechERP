@@ -44,8 +44,30 @@ export async function confirmCharge(
     };
   }
 
-  const plan = charge.subscription?.plan;
+  // O plano que está sendo pago vem da cobrança (`planCode`) — não da
+  // assinatura atual, que pode ainda estar em FREE. É por isto que um upgrade
+  // via checkout precisa trocar o `planId` aqui; antes, o cliente pagava o PRO
+  // e a assinatura continuava apontando para o plano antigo.
+  const plan = charge.planCode
+    ? await prismaUnscoped.plan.findUnique({ where: { code: charge.planCode } })
+    : (charge.subscription?.plan ?? null);
+
+  // Cobranças criadas antes de o vínculo virar obrigatório chegam sem
+  // subscriptionId. Sem esta resolução a ativação ficaria órfã: módulos seriam
+  // liberados, mas a assinatura continuaria TRIAL e o próximo dunning a
+  // suspenderia.
+  const subscriptionId =
+    charge.subscriptionId ??
+    (
+      await prismaUnscoped.subscription.findFirst({
+        where: { tenantId: charge.tenantId },
+        orderBy: { createdAt: 'desc' },
+      })
+    )?.id ??
+    null;
+
   const paidAt = new Date();
+  const nextPeriodEnd = new Date(paidAt.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   await prismaUnscoped.$transaction(async (tx) => {
     await tx.paymentCharge.update({
@@ -53,26 +75,28 @@ export async function confirmCharge(
       data: { status: 'PAID', paidAt, failureReason: null },
     });
 
-    if (charge.subscriptionId) {
+    if (subscriptionId) {
       await tx.subscription.update({
-        where: { id: charge.subscriptionId },
+        where: { id: subscriptionId },
         data: {
           status: 'ACTIVE',
+          ...(plan ? { planId: plan.id } : {}),
           pastDueSince: null,
           failedPaymentAttempts: 0,
           nextRetryAt: null,
+          currentPeriodEnd: nextPeriodEnd,
           firstChargedAt: charge.subscription?.firstChargedAt ?? paidAt,
         },
       });
     }
 
     // Só AGORA os módulos são liberados — depois da prova de pagamento.
-    const codes = new Set<string>([
+    const purchased = new Set<string>([
       ...(plan?.includedModules ?? []),
       ...(charge.moduleCodes ?? []),
     ]);
 
-    for (const moduleCode of codes) {
+    for (const moduleCode of purchased) {
       await tx.tenantModule.upsert({
         where: { tenantId_moduleCode: { tenantId: charge.tenantId, moduleCode } },
         create: { tenantId: charge.tenantId, moduleCode, active: true, activatedAt: paidAt },
@@ -80,11 +104,31 @@ export async function confirmCharge(
       });
     }
 
-    await tx.tenant.update({ where: { id: charge.tenantId }, data: { status: 'ACTIVE' } });
+    // Metade da troca de plano é desligar. Sem isto, quem saía de PRO para um
+    // plano menor continuava com os add-ons pagos ativos — o gatekeeper só
+    // olha `active`, então o vazamento era silencioso.
+    if (plan && purchased.size > 0) {
+      await tx.tenantModule.updateMany({
+        where: {
+          tenantId: charge.tenantId,
+          active: true,
+          moduleCode: { notIn: [...purchased] },
+        },
+        data: { active: false, deactivatedAt: paidAt },
+      });
+    }
+
+    // `gracePeriodEndsAt` é limpo aqui de propósito: ele foi preenchido no
+    // cadastro do trial e, se ficasse com data no passado, o cron (régua 4)
+    // voltaria a suspender um tenant acabado de pagar.
+    await tx.tenant.update({
+      where: { id: charge.tenantId },
+      data: { status: 'ACTIVE', gracePeriodEndsAt: null },
+    });
 
     await tx.billingEvent.create({
       data: {
-        subscriptionId: charge.subscriptionId,
+        subscriptionId,
         paymentChargeId: charge.id,
         provider: charge.provider,
         externalEventKey: `paid_${charge.externalProviderId ?? charge.id}_${paidAt.getTime()}`,
@@ -105,7 +149,10 @@ export async function confirmCharge(
   return {
     alreadyConfirmed: false,
     tenantId: charge.tenantId,
-    subscriptionId: charge.subscriptionId,
+    // Devolve o ID resolvido: quem chamou precisa saber qual assinatura foi
+    // de fato promovida (pode ter sido resolvida por tenant quando a cobrança
+    // antiga chegou sem vínculo).
+    subscriptionId,
   };
 }
 
@@ -119,6 +166,14 @@ export async function confirmCharge(
 export async function activateFreePlan(
   tenantId: string,
   planId: string,
+  /**
+   * Add-ons escolhidos que também custam zero (ex.: `crm`, que o catálogo
+   * marca como "incluso no PRO" e não em FREE). Sem estes, um FREE + add-on
+   * gratuito acabava em `computedMrr === 0` e o add-on nunca saía de
+   * `active: false` — o cliente clicava, o cobrança não pedia nada, e o
+   * módulo seguia respondendo 402.
+   */
+  extraModuleCodes: string[] = [],
 ): Promise<string> {
   const now = new Date();
   const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -148,7 +203,9 @@ export async function activateFreePlan(
           },
         });
 
-    for (const moduleCode of plan.includedModules) {
+    const included = Array.from(new Set([...plan.includedModules, ...extraModuleCodes]));
+
+    for (const moduleCode of included) {
       await tx.tenantModule.upsert({
         where: { tenantId_moduleCode: { tenantId, moduleCode } },
         create: { tenantId, moduleCode, active: true, activatedAt: now },
@@ -156,7 +213,23 @@ export async function activateFreePlan(
       });
     }
 
-    await tx.tenant.update({ where: { id: tenantId }, data: { status: 'TRIAL' } });
+    // Só ativar faltava o outro lado: quem desce para o plano gratuito
+    // mantinha os add-ons pagos ativos (o registro continuava `active: true`,
+    // e o gatekeeper só olha isto). Agora os módulos fora do plano novo saem.
+    await tx.tenantModule.updateMany({
+      where: {
+        tenantId,
+        active: true,
+        moduleCode: { notIn: included },
+      },
+      data: { active: false, deactivatedAt: now },
+    });
+
+    await tx.tenant.update({
+      where: { id: tenantId },
+      // Trial sem data de fim = plano local, nunca alcançado pela régua do cron.
+      data: { status: 'TRIAL', gracePeriodEndsAt: null },
+    });
     return subscription.id;
   });
 

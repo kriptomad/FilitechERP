@@ -113,15 +113,19 @@ export async function POST(request: Request) {
     slug = `${baseSlug}-${i}`;
   }
 
-  // Módulos sugeridos pelo nicho entram junto do plano, a menos que o cliente
-  // tenha escolhido explicitamente (o que sempre prevalece).
-  const activeCodes = Array.from(
-    new Set([
-      ...plan.includedModules,
-      ...(niche?.suggestedModules ?? []),
-      ...selectedModuleCodes,
-    ]),
+  // ── O que é liberado AGORA ───────────────────────────────────────────────────
+  // Só o que o plano escolhido realmente inclui. Módulos sugeridos pelo nicho e
+  // add-ons clicados na vitrine entram como `pendingModuleCodes` — eles têm
+  // preço, e ativá-los aqui seria entregar produto pago sem cobrar (o mesmo
+  // vazamento que o checkout já estava fechado: "nada é liberado antes do PSP").
+  const activatedCodes = Array.from(new Set(plan.includedModules));
+  const requestedCodes = Array.from(
+    new Set([...selectedModuleCodes, ...(niche?.suggestedModules ?? [])]),
   );
+  const pendingModuleCodes = requestedCodes.filter(
+    (code) => !activatedCodes.includes(code),
+  );
+  const activeCodes = activatedCodes;
 
   const computedMrr =
     Math.round(
@@ -131,9 +135,20 @@ export async function POST(request: Request) {
     ) / 100;
 
   const passwordHash = await hashPassword(password);
-  const isFree = plan.code === 'FREE';
+  // "Plano gratuito" é o que tem preço zero — a mesma guarda de
+  // activateFreePlan(), não uma comparação de string de código.
+  const isFree = Number(plan.basePrice) === 0;
   const now = new Date();
   const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  // Janela do trial do plano pago. Ela precisa EXISTIR: um tenant em TRIAL sem
+  // data de fim nunca é alcançado pela régua do dunning, e o plano escolhido
+  // ficaria liberado para sempre sem ninguém ter pago. TRIAL_DAYS=0 desliga.
+  const trialDays = Math.max(0, Number(process.env.TRIAL_DAYS ?? '7') || 0);
+  const gracePeriodEndsAt =
+    isFree || trialDays === 0
+      ? null
+      : new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);
 
   try {
     const created = await prismaUnscoped.$transaction(async (tx) => {
@@ -145,7 +160,11 @@ export async function POST(request: Request) {
           // `cnpj` é @unique e obrigatório no schema (Cap. 5); placeholder único
           // para quem cadastra pela vitrine sem documento na hora.
           cnpj: cnpj ?? `PENDENTE-${randomUUID().slice(0, 12).toUpperCase()}`,
-          status: isFree ? 'TRIAL' : 'ACTIVE',
+          // TRIAL, nunca ACTIVE: promover para ACTIVE é exclusivo de
+          // confirmCharge() após confirmação do PSP. O plano gratuito fica em
+          // TRIAL permanente (gracePeriodEndsAt nulo — nada a vencer).
+          status: 'TRIAL',
+          gracePeriodEndsAt,
           nicheCode: niche?.code as never,
         },
       });
@@ -189,23 +208,44 @@ export async function POST(request: Request) {
         });
       }
 
+      // Módulos pedidos mas não incluídos: registrados como INATIVOS. Assim a
+      // vitrine/dor do cliente aparece como "disponível para contratar" em vez
+      // de simplesmente sumir — e o gatekeeper continua recusando qualquer
+      // requisição a eles (402 com upsell) até o pagamento chegar.
+      if (pendingModuleCodes.length > 0) {
+        await tx.tenantModule.createMany({
+          data: pendingModuleCodes.map((moduleCode) => ({
+            tenantId: tenant.id,
+            moduleCode,
+            active: false,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
       const subscription = await tx.subscription.create({
         data: {
           tenantId: tenant.id,
           planId: plan.id,
-          provider: 'asaas',
-          externalSubscriptionId: `sub_${randomUUID()}`,
-          status: isFree ? 'TRIAL' : 'ACTIVE',
-          currentPeriodEnd: periodEnd,
+          // Sem PSP escolhido ainda: não existe assinatura no provedor até o
+          // checkout criar a cobrança. O ID `sub_...` fabricado aqui era
+          // indistinguível de um registro real para quem auditasse o banco.
+          provider: 'internal',
+          externalSubscriptionId: `pending_${randomUUID()}`,
+          status: 'TRIAL',
+          currentPeriodEnd: gracePeriodEndsAt ?? periodEnd,
         },
       });
 
       await tx.billingEvent.create({
         data: {
           subscriptionId: subscription.id,
-          provider: 'asaas',
+          provider: isFree ? 'free' : 'internal',
           externalEventKey: `signup_${randomUUID()}`,
-          type: isFree ? 'signup' : 'checkout.completed',
+          // `checkout.completed` documentaria um checkout que não aconteceu.
+          // O cadastro gera dois estados distintos e o próprio banco precisa
+          // dizer qual foi.
+          type: isFree ? 'signup' : 'signup.pending_payment',
           payload: {
             planCode: plan.code,
             billingCycle,
@@ -240,16 +280,30 @@ export async function POST(request: Request) {
           tenantSubdomain: created.tenant.slug,
         },
         activeModules: activeCodes,
+        // Módulos pedidos que ainda dependem de pagamento — o cliente precisa
+        // disto para saber o que está esperando, e não receber um "sucesso"
+        // com metade dos itens faltando.
+        pendingModuleCodes,
         plan: plan.code,
         subscriptionId: created.subscription.id,
         computedMrr,
         niche: niche ? { code: niche.code, label: niche.label } : null,
         // O onboarding usa isto para levar o lojista ao primeiro passo real.
+        // `checkout` vem antes de tudo quando há algo a pagar: abrir o caixa
+        // sem ter contratado o que o cliente escolheu geraria um ERP que
+        // responde 402 na primeira tela.
         onboarding: {
-          nextStep: niche ? 'abrir-caixa' : 'escolher-nicho',
-          message: niche
-            ? `Catálogo inicial de ${niche.label} carregado. Abra o caixa para começar a vender.`
-            : 'Escolha seu nicho para carregar o catálogo inicial.',
+          nextStep: !isFree || pendingModuleCodes.length > 0 ? 'checkout' : niche ? 'abrir-caixa' : 'escolher-nicho',
+          message: !isFree
+            ? `Plano ${plan.label} pré-liberado por ${trialDays === 0 ? '0' : trialDays} dia(s). Conclua o pagamento para confirmar a assinatura.`
+            : pendingModuleCodes.length > 0
+              ? `${pendingModuleCodes.length} módulo(s) extras aguardando contratação. Continue para o checkout quando quiser ativá-los.`
+              : niche
+                ? `Catálogo inicial de ${niche.label} carregado. Abra o caixa para começar a vender.`
+                : 'Escolha seu nicho para carregar o catálogo inicial.',
+          checkoutUrl: !isFree || pendingModuleCodes.length > 0
+            ? `/checkout?plan=${encodeURIComponent(plan.code)}&mods=${encodeURIComponent(pendingModuleCodes.join(','))}&nicho=${encodeURIComponent(niche?.code ?? '')}`
+            : null,
         },
       }),
       { status: 201 },

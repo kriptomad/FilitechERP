@@ -20,7 +20,13 @@ import type { NicheSummary } from '../../../lib/niches';
 
 interface SignupResponse {
   niche: { code: string; label: string } | null;
-  onboarding: { nextStep: string; message: string };
+  onboarding: {
+    nextStep: string;
+    message: string;
+    /** Presente quando há algo a pagar — leva direto ao checkout. */
+    checkoutUrl?: string | null;
+  };
+  pendingModuleCodes?: string[];
 }
 
 const inputClass =
@@ -123,6 +129,14 @@ export function SignupView() {
         privacyPolicyAccepted: privacyAccepted,
       });
 
+      // Plano pago (ou add-ons extras escolhidos) não estão ativos ainda: sem
+      // pagamento nada é liberado. Mandar direto para o painel deixaria o
+      // cliente a navegar num ERP que responde 402 em todos os módulos.
+      if (response.onboarding.nextStep === 'checkout' && response.onboarding.checkoutUrl) {
+        router.push(response.onboarding.checkoutUrl);
+        return;
+      }
+
       router.push(`/painel?cadastro=sucesso&niche=${response.niche?.code ?? ''}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Não foi possível criar a conta.');
@@ -137,13 +151,17 @@ export function SignupView() {
   return (
     <main className="mx-auto w-full max-w-2xl px-5 py-14">
       <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400">
-        Tier grátis · sem cartão
+        {planCode && planCode !== 'FREE'
+          ? `Plano ${planCode} · pagamento no próximo passo`
+          : 'Tier grátis · sem cartão'}
       </p>
       <h1 className="mt-2 text-3xl font-bold tracking-tight text-zinc-50">
         Crie sua conta
       </h1>
       <p className="mt-3 text-sm text-zinc-400">
-        Menos de um minuto. Você começa no plano gratuito e evolui quando quiser.
+        {planCode && planCode !== 'FREE'
+          ? 'Menos de um minuto. A conta é criada agora e nada é cobrado até você concluir o pagamento na tela seguinte.'
+          : 'Menos de um minuto. Você começa no plano gratuito e evolui quando quiser.'}
       </p>
 
       <form onSubmit={submit} className="card-site mt-8 space-y-6 p-6">
@@ -298,7 +316,11 @@ export function SignupView() {
           disabled={busy}
           className="w-full rounded-xl bg-indigo-500 py-3.5 font-medium text-white transition hover:bg-indigo-400 disabled:opacity-60"
         >
-          {busy ? 'Criando conta…' : 'Criar conta grátis'}
+          {busy
+            ? 'Criando conta…'
+            : planCode && planCode !== 'FREE'
+              ? 'Criar conta e continuar'
+              : 'Criar conta grátis'}
         </button>
 
         <p className="text-center text-sm text-zinc-500">

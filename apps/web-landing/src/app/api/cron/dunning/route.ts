@@ -41,12 +41,16 @@ export async function GET(request: Request) {
   }
 
   const now = new Date();
-  const summary = { retried: 0, suspended: 0, recovered: 0, errors: 0 };
+  const summary = { retried: 0, suspended: 0, recovered: 0, errors: 0, trialsExpired: 0 };
 
   // ── 1. Cobranças pendentes whose tentativas de nova tentativa venceram ─────
   const dueCharges = await prismaUnscoped.paymentCharge.findMany({
     where: {
       status: 'PENDING',
+      // `subscriptionId` é anulável (eventos órfãos são permitidos no schema).
+      // Sem este filtro, `subscription.update({ where: { id: null! } })` lançaria
+      // dentro do try e a cobrança real ao lado nunca seria processada.
+      subscriptionId: { not: null },
       subscription: { nextRetryAt: { lte: now } },
     },
     select: {
@@ -181,6 +185,44 @@ export async function GET(request: Request) {
     } catch (err) {
       summary.errors += 1;
       console.error('[cron:dunning] falha ao recuperar tenant', tenant.id, err);
+    }
+  }
+
+  // ── 4. Trial de plano pago vencido sem pagamento → SUSPENDED ─────────────
+  //
+  // O cadastro põe o tenant em TRIAL com `gracePeriodEndsAt` preenchido
+  // (Cap. 1.2.1 / 2.4). Sem esta régua, um cliente que escolheu PRO e nunca
+  // foi ao checkout manteria para sempre os módulos do plano pago — em TRIAL
+  // nada cai por conta própria. Locais gratuitos (`gracePeriodEndsAt` nulo)
+  // nunca entram aqui.
+  const expiredTrials = await prismaUnscoped.tenant.findMany({
+    where: {
+      status: 'TRIAL',
+      gracePeriodEndsAt: { lte: now },
+    },
+    select: { id: true },
+    take: 100,
+  });
+
+  for (const tenant of expiredTrials) {
+    try {
+      await prismaUnscoped.$transaction([
+        prismaUnscoped.tenant.update({
+          where: { id: tenant.id },
+          data: { status: 'SUSPENDED' },
+        }),
+        prismaUnscoped.subscription.updateMany({
+          where: { tenantId: tenant.id, status: 'TRIAL' },
+          data: { status: 'SUSPENDED' },
+        }),
+      ]);
+
+      await invalidateModulesCache(tenant.id);
+      summary.suspended += 1;
+      summary.trialsExpired += 1;
+    } catch (err) {
+      summary.errors += 1;
+      console.error('[cron:dunning] falha ao encerrar trial', tenant.id, err);
     }
   }
 

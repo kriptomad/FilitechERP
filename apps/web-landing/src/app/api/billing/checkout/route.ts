@@ -23,6 +23,7 @@ import { round2 } from '@/server/billing-catalog';
 import { absoluteUrl } from '@/server/env';
 import { resolveGateway, gatewayDisplayName } from '@/server/payment/gateway';
 import { activateFreePlan, confirmCharge } from '@/server/payment/confirm-charge';
+import { handle } from '@/server/handler';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,10 @@ interface CheckoutBody {
   paymentMethod?: unknown;
 }
 
-export async function POST(request: Request) {
+// `handle()` converte DomainError (JSON inválido, plano inexistente, gateway
+// ausente) no envelope de erro correto — sem ele, `readJson` lançando num JSON
+// malformado virava 500 genérico.
+export const POST = handle(async (request: Request) => {
   const body = await readJson<CheckoutBody>(request);
   const planCode = optionalString(body.planCode, 'planCode', 40) ?? 'BASIC';
   const billingCycle = optionalString(body.billingCycle, 'billingCycle', 20) ?? 'MONTHLY';
@@ -83,7 +87,11 @@ export async function POST(request: Request) {
     if (extraCodes) qs.set('mods', extraCodes);
 
     return jsonSuccess({
-      subscriptionId: `preview_${Date.now()}`,
+      // Nenhuma assinatura foi criada nesta rota (não há sessão): um ID aqui
+      // seria inventado e não existiria no banco. Quem vê este payload está
+      // apenas olhando o cálculo.
+      subscriptionId: null,
+      preview: true,
       computedMrr,
       billingCycle,
       breakdown,
@@ -94,7 +102,11 @@ export async function POST(request: Request) {
 
   // ── Plano gratuito: não há o que cobrar ───────────────────────────────────
   if (computedMrr === 0) {
-    const subscriptionId = await activateFreePlan(session.tenantId, plan.id);
+    const subscriptionId = await activateFreePlan(
+      session.tenantId,
+      plan.id,
+      selectedModuleCodes,
+    );
 
     return jsonSuccess({
       subscriptionId,
@@ -134,6 +146,29 @@ export async function POST(request: Request) {
     throw new DomainError('TENANT_NOT_FOUND', 'Conta não encontrada.', 404);
   }
 
+  // ── Vínculo obrigatório com a assinatura ─────────────────────────────────
+  //
+  // `PaymentCharge.subscriptionId` é anulável, e este endpoint criava a
+  // cobrança SEM ele. Consequência: quando o webhook chegava, confirmCharge()
+  // não tinha subscription para promover a ACTIVE, e — como o plano vinha do
+  // `subscription.plan` — também não ativava nenhum módulo do plano. O cliente
+  // pagava e continuava bloqueado, sem nenhum log de erro.
+  const subscription =
+    (await prismaUnscoped.subscription.findFirst({
+      where: { tenantId: session.tenantId },
+      orderBy: { createdAt: 'desc' },
+    })) ??
+    (await prismaUnscoped.subscription.create({
+      data: {
+        tenantId: session.tenantId,
+        planId: plan.id,
+        provider: 'internal',
+        externalSubscriptionId: `pending_${randomUUID()}`,
+        status: 'TRIAL',
+        currentPeriodEnd: periodEnd,
+      },
+    }));
+
   const description = `Filitech ERP — plano ${plan.label}${
     selectedModuleCodes.length > 0 ? ` + ${selectedModuleCodes.length} módulo(s)` : ''
   }`;
@@ -153,6 +188,7 @@ export async function POST(request: Request) {
   const paymentCharge = await prismaUnscoped.paymentCharge.create({
     data: {
       tenantId: session.tenantId,
+      subscriptionId: subscription.id,
       planCode: plan.code,
       moduleCodes: selectedModuleCodes,
       type: 'SUBSCRIPTION',
@@ -171,7 +207,7 @@ export async function POST(request: Request) {
 
   await prismaUnscoped.billingEvent.create({
     data: {
-      subscriptionId: null,
+      subscriptionId: subscription.id,
       paymentChargeId: paymentCharge.id,
       provider: gateway.name,
       externalEventKey: `checkout_${randomUUID()}`,
@@ -189,7 +225,7 @@ export async function POST(request: Request) {
 
   return jsonSuccess({
     paymentChargeId: paymentCharge.id,
-    subscriptionId: null,
+    subscriptionId: subscription.id,
     computedMrr,
     billingCycle,
     breakdown,
@@ -213,4 +249,4 @@ export async function POST(request: Request) {
       `/painel?checkout=${paymentCharge.status === 'PAID' ? 'sucesso' : 'pendente'}&charge=${paymentCharge.id}`,
     ),
   });
-}
+});
