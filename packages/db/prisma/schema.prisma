@@ -192,6 +192,7 @@ model Tenant {
   niche             Niche?            @relation(fields: [nicheCode], references: [code])
 
   onlineStoreSettings        OnlineStoreSettings?
+  openFinanceConsents        OpenFinanceConsent[]
   fiscalDocumentEvents       FiscalDocumentEvent[]
   chartOfAccounts            ChartOfAccount[]
   costCenters                CostCenter[]
@@ -210,6 +211,17 @@ model Tenant {
   accountingTasksAsClient    AccountingTask[] @relation("AccountingTasksAsClient")
   officialTaxDocuments       OfficialTaxDocument[] @relation("OfficialTaxDocumentsOfTenant")
   officialTaxDocumentsGenerated OfficialTaxDocument[] @relation("OfficialTaxDocumentsGeneratedByFirm")
+  netWorthSnapshots    NetWorthSnapshot[]
+  personalBills        PersonalBill[]
+  personalDebts        PersonalDebt[]
+  personalInvestments  PersonalInvestment[]
+  personalGoals        PersonalGoal[]
+  personalBudgets      PersonalBudget[]
+  personalCategories   PersonalCategory[]
+  personalRecurrenceRules PersonalRecurrenceRule[]
+  personalTransactions PersonalTransaction[]
+  bankAccounts         BankAccount[]
+  personalAccounts     PersonalAccount[] @relation("PersonalAccountTenant")
   @@index([status])
   @@index([parentTenantId])
   @@map("tenants")
@@ -386,6 +398,9 @@ model User {
   dashboardLayout            DashboardLayout?
   dataImportJobsCreated      DataImportJob[]
   ibsCbsRegimeElections      TenantIbsCbsRegimeElection[]
+  personalTransactionSplits PersonalTransactionSplit[]
+  personalTransactionsCreated PersonalTransaction[]
+  personalAccountsOwned     PersonalAccount[] @relation("PersonalAccountOwner")
   @@unique([tenantId, email])
   @@index([tenantId, role])
   @@map("users")
@@ -1670,6 +1685,41 @@ model OnlineStoreSettings {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// OPEN FINANCE (PLUGGY) — Cap. 17.4.1 / 22.5
+// ─────────────────────────────────────────────────────────────────────────
+
+enum OpenFinanceConsentStatus {
+  UPDATING
+  UPDATED
+  LOGIN_ERROR
+  OUTDATED
+  WAITING_USER_INPUT
+}
+
+/// Consentimento real de Open Finance (Cap. 22.5) — um registro por instituição
+/// conectada via agregador (Pluggy). `itemId` é o identificador do agregador, nunca
+/// as credenciais bancárias do usuário (que nunca transitam nem são persistidas pelo
+/// Filitech — o fluxo de login acontece inteiramente dentro do widget do agregador).
+model OpenFinanceConsent {
+  id                 String                   @id @default(uuid())
+  tenantId           String
+  provider           String                   @default("PLUGGY")
+  itemId             String                   @unique
+  institutionName    String
+  status             OpenFinanceConsentStatus @default(UPDATING)
+  consentExpiresAt   DateTime
+  lastSyncedAt       DateTime?
+  createdAt          DateTime                 @default(now())
+
+  tenant             Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  accounts           PersonalAccount[] // preenchido quando o tenant é PERSONAL (Cap. 22.5)
+  bankAccounts       BankAccount[]     // preenchido quando o tenant é BUSINESS (Cap. 17.4.1) — mutuamente exclusivo com `accounts` na prática, pois um tenant tem um único `Plan.audience`
+
+  @@index([tenantId, status])
+  @@map("open_finance_consents")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // EVENTOS FISCAIS PÓS-EMISSÃO: Cancelamento, Carta de Correção, Manifestação do Destinatário — Cap. 21.19
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -2438,4 +2488,386 @@ model AccountingMarketplaceReview {
   @@unique([engagementId, authorUserId])
   @@index([accountingFirmTenantId])
   @@map("accounting_marketplace_reviews")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// FILITECH PESSOAL (B2C) — CONTAS, INVESTIMENTOS, OPEN FINANCE — Cap. 22
+// ─────────────────────────────────────────────────────────────────────────
+
+enum PersonalAccountType {
+  CHECKING
+  SAVINGS
+  WALLET_CASH
+  CREDIT_CARD
+  INVESTMENT_BROKERAGE
+}
+
+model PersonalAccount {
+  id                 String              @id @default(uuid())
+  tenantId           String
+  ownerId            String?             // User que cadastrou; null = conta explicitamente do casal (sem dono único)
+  name               String
+  type               PersonalAccountType
+  institutionName    String?             // "Nubank", "Itaú", "Carteira" etc.
+  currentBalance     Decimal             @default(0) @db.Decimal(14, 2)
+  creditLimit        Decimal?            @db.Decimal(14, 2) // obrigatório em uso quando type = CREDIT_CARD
+  invoiceClosingDay  Int?                // dia do mês em que a fatura fecha (type = CREDIT_CARD)
+  invoiceDueDay      Int?                // dia do mês de vencimento da fatura (type = CREDIT_CARD)
+  isShared           Boolean             @default(true) // visível para todos os membros da residência (Cap. 22.3)
+  openFinanceConsentId String?           // preenchido quando a conta é sincronizada automaticamente (Cap. 22.5)
+  openFinanceExternalAccountId String?  // id lógico da conta no agregador — evita duplicar a mesma conta a cada novo "item/updated" da Pluggy
+  archivedAt         DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  tenant             Tenant              @relation("PersonalAccountTenant", fields: [tenantId], references: [id], onDelete: Cascade)
+  owner              User?               @relation("PersonalAccountOwner", fields: [ownerId], references: [id])
+  openFinanceConsent OpenFinanceConsent? @relation(fields: [openFinanceConsentId], references: [id])
+  transactions       PersonalTransaction[]
+  investments        PersonalInvestment[]
+  goals              PersonalGoal[]
+  billsAutoDebit     PersonalBill[]
+
+  @@index([tenantId, type])
+  // Identidade lógica da conta externa sincronizada via Open Finance (Cap. 22.5)
+  // — evita criar uma PersonalAccount duplicada a cada novo "item/updated" da Pluggy
+  // para a mesma instituição dentro do mesmo consentimento.
+  @@unique([openFinanceConsentId, institutionName])
+  @@map("personal_accounts")
+}
+
+model BankAccount {
+  id                     String   @id @default(uuid())
+  tenantId               String
+  bankName               String
+  agencyNumber           String
+  accountNumber          String
+  currentBalance         Decimal  @default(0) @db.Decimal(12, 2)
+  openFinanceConsentId   String?  // preenchido quando a conta é sincronizada automaticamente, mesmo padrão de PersonalAccount
+  openFinanceExternalAccountId String? // id lógico da conta no agregador — evita duplicar a mesma conta a cada reconexão
+
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  openFinanceConsent OpenFinanceConsent? @relation(fields: [openFinanceConsentId], references: [id])
+  transactions   BankTransaction[]
+
+  @@unique([openFinanceConsentId, openFinanceExternalAccountId])
+  @@map("bank_accounts")
+}
+
+enum BankTransactionReconciliationStatus {
+  UNMATCHED
+  SUGGESTED
+  MATCHED
+  IGNORED
+}
+
+model BankTransaction {
+  id                String                               @id @default(uuid())
+  tenantId          String
+  bankAccountId     String
+  externalFitId     String  // FITID do OFX (importação manual) OU id da transação no agregador Open Finance (sincronização automática, Cap. 17.4.1) — em ambos os casos, a chave de idempotência real do banco/agregador, nunca um id interno
+  description       String
+  amount            Decimal                               @db.Decimal(12, 2)
+  transactionDate   DateTime
+  reconciliationStatus BankTransactionReconciliationStatus @default(UNMATCHED)
+  matchedAccountPayableId    String?
+  matchedAccountReceivableId String?
+  importedAt        DateTime                               @default(now())
+
+  bankAccount       BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, bankAccountId, externalFitId])
+  @@map("bank_transactions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// FILITECH PESSOAL (B2C) — TRANSAÇÕES, CATEGORIAS, ORÇAMENTOS — Cap. 22
+// ─────────────────────────────────────────────────────────────────────────
+
+enum PersonalTransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+model PersonalTransaction {
+  id                     String                  @id @default(uuid())
+  tenantId               String
+  accountId              String
+  categoryId             String?
+  createdByUserId        String
+  recurrenceRuleId       String?
+  description            String
+  merchantName           String?                 // nome do estabelecimento (extraído do extrato ou do Open Finance), usado no motor de categorização automática (Cap. 22.4)
+  type                   PersonalTransactionType
+  amount                 Decimal                 @db.Decimal(14, 2) // sempre positivo; o "type" define o sinal no cálculo de saldo, nunca um valor negativo armazenado
+  transactionDate        DateTime
+  isPrivate              Boolean                 @default(false) // Cap. 22.3 — visível apenas para createdByUserId dentro da residência
+  attachmentStorageKey   String?                 // foto do recibo, R2 (Cap. 20.5)
+  openFinanceExternalId  String?                 @unique // idempotência: evita duplicar a mesma transação em cada sincronização do Open Finance (Cap. 22.5)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  tenant                 Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account                PersonalAccount         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category               PersonalCategory?       @relation(fields: [categoryId], references: [id])
+  createdBy              User                    @relation(fields: [createdByUserId], references: [id])
+  recurrenceRule         PersonalRecurrenceRule? @relation(fields: [recurrenceRuleId], references: [id])
+  splits                 PersonalTransactionSplit[]
+  @@index([tenantId, accountId, transactionDate])
+  @@index([tenantId, categoryId, transactionDate])
+  @@map("personal_transactions")
+}
+
+model PersonalTransactionSplit {
+  id            String              @id @default(uuid())
+  transactionId String
+  userId        String
+  percentage    Decimal             @db.Decimal(5, 2)
+  amount        Decimal             @db.Decimal(14, 2)
+
+  transaction   PersonalTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  user          User                @relation(fields: [userId], references: [id])
+
+  @@unique([transactionId, userId])
+  @@map("personal_transaction_splits")
+}
+
+enum PersonalRecurrenceFrequency {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+model PersonalRecurrenceRule {
+  id                   String                      @id @default(uuid())
+  tenantId             String
+  frequency            PersonalRecurrenceFrequency
+  dayOfMonth           Int?                        // obrigatório quando frequency = MONTHLY/YEARLY
+  templateDescription  String
+  templateAmount       Decimal                     @db.Decimal(14, 2)
+  templateAccountId    String
+  templateCategoryId   String?
+  nextOccurrenceAt     DateTime
+  endDate              DateTime?
+  active               Boolean                     @default(true)
+  createdAt            DateTime                    @default(now())
+
+  tenant               Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  generatedTransactions PersonalTransaction[]
+  @@index([tenantId, active, nextOccurrenceAt])
+  @@map("personal_recurrence_rules")
+}
+
+enum PersonalCategoryType {
+  INCOME
+  EXPENSE
+}
+
+model PersonalCategory {
+  id               String               @id @default(uuid())
+  tenantId         String
+  parentCategoryId String?
+  name             String
+  icon             String?              // nome do ícone MUI (Cap. 8) — ex.: "LocalGroceryStore"
+  type             PersonalCategoryType
+  isSystemDefault  Boolean              @default(false) // categorias seedadas no onboarding (Moradia, Alimentação, Transporte, Lazer, Saúde, Educação, Investimentos) — não podem ser excluídas, apenas desativadas
+  isCarneLeaoIncome Boolean             @default(false) // marca rendimento tributável sujeito a Carnê-Leão (aluguel/autônomo recebido de PF) — Cap. 22.11
+  active           Boolean              @default(true)
+
+  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parentCategory   PersonalCategory?    @relation("PersonalCategoryHierarchy", fields: [parentCategoryId], references: [id])
+  subcategories    PersonalCategory[]   @relation("PersonalCategoryHierarchy")
+  transactions     PersonalTransaction[]
+  budgets          PersonalBudget[]
+  bills            PersonalBill[]
+
+  @@index([tenantId, type])
+  @@map("personal_categories")
+}
+
+model PersonalBudget {
+  id             String           @id @default(uuid())
+  tenantId       String
+  categoryId     String
+  monthReference DateTime         // sempre normalizado para o dia 01 do mês de referência
+  limitAmount    Decimal          @db.Decimal(14, 2)
+  rolloverEnabled Boolean         @default(false) // se true, saldo não gasto do mês anterior soma ao limite do mês seguinte
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category       PersonalCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, categoryId, monthReference])
+  @@map("personal_budgets")
+}
+
+enum PersonalGoalType {
+  SAVINGS
+  DEBT_PAYOFF
+  EMERGENCY_FUND
+  PURCHASE
+}
+
+enum PersonalGoalStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+model PersonalGoal {
+  id              String             @id @default(uuid())
+  tenantId        String
+  linkedAccountId String?            // conta-poupança dedicada à meta, se existir
+  name            String
+  type            PersonalGoalType
+  targetAmount    Decimal            @db.Decimal(14, 2)
+  currentAmount   Decimal            @default(0) @db.Decimal(14, 2)
+  targetDate      DateTime?
+  status          PersonalGoalStatus @default(ACTIVE)
+  createdAt       DateTime           @default(now())
+
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  linkedAccount   PersonalAccount?   @relation(fields: [linkedAccountId], references: [id])
+
+  @@index([tenantId, status])
+  @@map("personal_goals")
+}
+
+enum PersonalInvestmentAssetType {
+  TESOURO_DIRETO
+  CDB
+  LCI_LCA
+  ACOES
+  FII
+  CRIPTO
+  PREVIDENCIA_PRIVADA
+  POUPANCA
+}
+
+model PersonalInvestment {
+  id                    String                      @id @default(uuid())
+  tenantId              String
+  accountId             String
+  assetType             PersonalInvestmentAssetType
+  assetName             String
+  ticker                String?
+  quantity              Decimal                     @db.Decimal(18, 8) // precisão alta — necessária para frações de cripto
+  averagePrice          Decimal                     @db.Decimal(14, 2)
+  currentPrice          Decimal                     @db.Decimal(14, 2)
+  openFinanceExternalId String?                     @unique // idempotência de sincronização (Cap. 22.5)
+  updatedAt             DateTime                    @updatedAt
+
+  tenant                Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account               PersonalAccount             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  priceHistory          PersonalInvestmentPriceHistory[]
+  @@index([tenantId, assetType])
+  @@map("personal_investments")
+}
+
+model PersonalInvestmentPriceHistory {
+  id           String             @id @default(uuid())
+  investmentId String
+  priceDate    DateTime
+  closingPrice Decimal            @db.Decimal(14, 2)
+
+  investment   PersonalInvestment @relation(fields: [investmentId], references: [id], onDelete: Cascade)
+
+  @@unique([investmentId, priceDate])
+  @@map("personal_investment_price_history")
+}
+
+enum PersonalDebtType {
+  FINANCIAMENTO_IMOVEL
+  FINANCIAMENTO_VEICULO
+  EMPRESTIMO_PESSOAL
+  CARTAO_PARCELADO
+  CHEQUE_ESPECIAL
+}
+
+enum PersonalDebtStatus {
+  ACTIVE
+  PAID_OFF
+}
+
+model PersonalDebt {
+  id                  String             @id @default(uuid())
+  tenantId            String
+  name                String
+  type                PersonalDebtType
+  originalAmount      Decimal            @db.Decimal(14, 2)
+  remainingAmount     Decimal            @db.Decimal(14, 2)
+  interestRateMonthly Decimal            @db.Decimal(6, 4) // ex.: 1.99 = 1,99% a.m., usado no calculador de quitação (Cap. 22.6)
+  installmentsTotal   Int
+  installmentsPaid    Int                @default(0)
+  dueDay              Int
+  status              PersonalDebtStatus @default(ACTIVE)
+  createdAt           DateTime           @default(now())
+
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  installments        PersonalDebtInstallment[]
+  @@index([tenantId, status])
+  @@map("personal_debts")
+}
+
+enum PersonalDebtInstallmentStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+model PersonalDebtInstallment {
+  id                String                        @id @default(uuid())
+  debtId            String
+  installmentNumber Int
+  dueDate           DateTime
+  amount            Decimal                       @db.Decimal(14, 2)
+  paidAt            DateTime?
+  status            PersonalDebtInstallmentStatus @default(PENDING)
+
+  debt              PersonalDebt                  @relation(fields: [debtId], references: [id], onDelete: Cascade)
+
+  @@unique([debtId, installmentNumber])
+  @@map("personal_debt_installments")
+}
+
+enum PersonalBillStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+model PersonalBill {
+  id                  String             @id @default(uuid())
+  tenantId            String
+  categoryId          String?
+  autoDebitAccountId  String?
+  name                String
+  amount              Decimal            @db.Decimal(14, 2) // estimado para contas de valor variável (luz/água); ajustado manualmente a cada lançamento real
+  dueDay              Int
+  isRecurring         Boolean            @default(true)
+  reminderDaysBefore  Int                @default(3)
+  lastPaidAt          DateTime?
+  status              PersonalBillStatus @default(PENDING)
+  createdAt           DateTime           @default(now())
+
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category            PersonalCategory?  @relation(fields: [categoryId], references: [id])
+  autoDebitAccount    PersonalAccount?   @relation(fields: [autoDebitAccountId], references: [id])
+
+  @@index([tenantId, status, dueDay])
+  @@map("personal_bills")
+}
+
+model NetWorthSnapshot {
+  id                String   @id @default(uuid())
+  tenantId          String
+  snapshotDate      DateTime
+  totalAssets       Decimal  @db.Decimal(16, 2) // soma de PersonalAccount.currentBalance (exceto CREDIT_CARD) + PersonalInvestment (quantity * currentPrice)
+  totalLiabilities  Decimal  @db.Decimal(16, 2) // soma de PersonalDebt.remainingAmount + faturas de cartão em aberto
+  netWorth          Decimal  @db.Decimal(16, 2) // totalAssets - totalLiabilities, nunca recebido do cliente — sempre recalculado no servidor
+
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, snapshotDate])
+  @@map("net_worth_snapshots")
 }

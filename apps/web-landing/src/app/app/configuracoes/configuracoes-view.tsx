@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, post, patch, ApiError } from '@/lib/api';
+import { OpenFinanceConnect } from './OpenFinanceConnect';
 
 interface User {
   id: string;
@@ -59,13 +60,14 @@ interface Props {
   subscription: Subscription | null;
 }
 
-type Tab = 'fiscal' | 'seguranca' | 'nicho' | 'fidelidade';
+type Tab = 'fiscal' | 'seguranca' | 'nicho' | 'fidelidade' | 'openfinance';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'fiscal', label: 'Dados fiscais' },
   { key: 'seguranca', label: 'Segurança' },
   { key: 'nicho', label: 'Nicho do negócio' },
   { key: 'fidelidade', label: 'Fidelidade' },
+  { key: 'openfinance', label: 'Open Finance' },
 ];
 
 const inputClass =
@@ -152,6 +154,7 @@ export function ConfiguracoesView({
       )}
       {tab === 'nicho' && <NicheTab currentCode={tenant.nicheCode} niches={niches} />}
       {tab === 'fidelidade' && <LoyaltyTab role={user.role} />}
+      {tab === 'openfinance' && <OpenFinanceConnect />}
     </div>
   );
 }

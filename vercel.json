@@ -21,6 +21,10 @@
     {
       "path": "/api/cron/loyalty-expire",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/pluggy-sync",
+      "schedule": "0 */6 * * *"
     }
   ],
 
