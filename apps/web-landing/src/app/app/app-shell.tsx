@@ -22,6 +22,10 @@ const NAV: NavItem[] = [
   // 402 com upsell ao ser clicado.
   { href: '/app/clientes', label: 'Clientes', moduleCode: 'crm' },
   { href: '/app/financeiro', label: 'Financeiro', moduleCode: 'financeiro' },
+  // Sem `moduleCode`: o módulo de contabilidade existe para todo tenant (Caminho
+  // B do Cap. 21.18.1 — exportar para o contador de fora) e o gatekeeper não
+  // tem um código de módulo para ele.
+  { href: '/app/contabilidade', label: 'Contabilidade', moduleCode: '' },
   { href: '/app/configuracoes', label: 'Configurações', moduleCode: '' },
 ];
 

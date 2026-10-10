@@ -113,6 +113,16 @@ model NicheTemplateProduct {
   @@map("niche_template_products")
 }
 
+// Natureza do tenant (Cap. 21.18.1 / 21.17).
+// ACCOUNTING_OFFICE marca o escritório de contabilidade que TAMBÉM é tenant
+// da plataforma — é ele que possui `accountingFirmProfile` e aparece no
+// marketplace (21.18.6). BUSINESS é o lojista normal; PERSONAL, o CPF.
+enum TenantType {
+  BUSINESS
+  PERSONAL
+  ACCOUNTING_OFFICE
+}
+
 model Tenant {
   id                String       @id @default(uuid())
   parentTenantId    String?
@@ -130,6 +140,10 @@ model Tenant {
   simplesNacionalAnexo String?
   inscricaoEstadual String?
   uf                String?
+  // Tipo do tenant (Cap. 21.18) — um escritório de contabilidade é um tenant
+  // BUSINESS normal, só que com `tenantType = ACCOUNTING_OFFICE` e um
+  // `accountingFirmProfile` para ser listado no marketplace de contadores.
+  tenantType        TenantType   @default(BUSINESS)
   // Faturamento do tenant no mês corrente (consolidado pelo PDV). Base de
   // cálculo dos limites do Tier Free (Cap. 2.4) e do regime de cobrança.
   createdAt         DateTime     @default(now())

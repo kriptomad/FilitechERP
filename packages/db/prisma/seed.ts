@@ -48,6 +48,31 @@ const MODULES = [
   { code: "construction-fractional", label: "Construção (Venda Fracionada)", monthlyPrice: 44.9, description: "Compra vs venda, conversão de unidade e desconto progressivo." },
 ];
 
+const LAYOUT_VERSIONS = [
+  {
+    documentType: "ECD" as const,
+    layoutVersion: "ECD-2025",
+    sourceDescription:
+      "Referência de leiaute registrada pela plataforma para escrituração contábil " +
+      "(blocos 0/T/I/J/L). Catálogo interno — não substitui o leiaute oficial da " +
+      "Receita; atualize quando ela publicar nova versão.",
+  },
+  {
+    documentType: "ECF" as const,
+    layoutVersion: "ECF-2025",
+    sourceDescription:
+      "Referência de leiaute registrada pela plataforma para escrituração contábil " +
+      "fiscal. Catálogo interno — não substitui o leiaute oficial da Receita.",
+  },
+  {
+    documentType: "DEFIS" as const,
+    layoutVersion: "DEFIS-2025",
+    sourceDescription:
+      "Referência de leiaute registrada pela plataforma para o DEFIS do Simples " +
+      "Nacional. Catálogo interno — não substitui o leiaute oficial da Receita.",
+  },
+];
+
 async function main() {
   for (const plan of PLANS) {
     await prisma.plan.upsert({
@@ -65,7 +90,35 @@ async function main() {
     });
   }
 
-  console.log(`Seeded ${PLANS.length} planos e ${MODULES.length} módulos.`);
+  // Catálogo de leiautes oficiais (Cap. 21.18.7). Sem uma linha VIGENTE aqui a
+  // exportação é recusada com 503 — de propósito: a versão nunca pode ser
+  // inventada dentro do código. `OfficialDocumentLayoutVersion` não tem chave
+  // única própria, então o upsert é por (documentType, layoutVersion).
+  let seededLayouts = 0;
+  for (const layout of LAYOUT_VERSIONS) {
+    const existing = await prisma.officialDocumentLayoutVersion.findFirst({
+      where: { documentType: layout.documentType, layoutVersion: layout.layoutVersion },
+    });
+
+    if (existing) {
+      await prisma.officialDocumentLayoutVersion.update({
+        where: { id: existing.id },
+        data: { sourceDescription: layout.sourceDescription, effectiveTo: null },
+      });
+    } else {
+      await prisma.officialDocumentLayoutVersion.create({
+        data: {
+          ...layout,
+          effectiveFrom: new Date("2025-01-01T00:00:00Z"),
+        },
+      });
+    }
+    seededLayouts += 1;
+  }
+
+  console.log(
+    `Seeded ${PLANS.length} planos, ${MODULES.length} módulos e ${seededLayouts} leiautes.`,
+  );
 }
 
 main()

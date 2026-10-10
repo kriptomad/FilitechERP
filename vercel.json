@@ -13,6 +13,10 @@
     {
       "path": "/api/cron/expire-charges",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/accounting-tasks",
+      "schedule": "30 3 * * *"
     }
   ],
 
