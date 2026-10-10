@@ -49,6 +49,12 @@ export const env = {
   get mercadoPagoWebhookSecret(): string {
     return optional('MERCADO_PAGO_WEBHOOK_SECRET');
   },
+  get metaWebhookSecret(): string {
+    return optional('META_WEBHOOK_SECRET');
+  },
+  get metaWebhookVerifyToken(): string {
+    return optional('META_WEBHOOK_VERIFY_TOKEN');
+  },
   get stripeSecretKey(): string {
     return optional('STRIPE_SECRET_KEY');
   },

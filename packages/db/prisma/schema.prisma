@@ -434,6 +434,8 @@ model Client {
   creditLimit  Decimal  @default(0) @db.Decimal(12, 2)
   creditBalanceUsed Decimal @default(0) @db.Decimal(12, 2)
   isBusinessAccount Boolean @default(false) // Cap. 11.8 — perfil construtora/empreiteiro
+  whatsappOptInAt  DateTime? // Capítulo 20.2.1 — opt-in explícito para mensagens MARKETING
+  whatsappOptOutAt DateTime? // Capítulo 20.2.1 — bloqueia qualquer novo envio até novo opt-in
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -1474,10 +1476,14 @@ model Notification {
   title        String
   body         String
   priority     NotificationPriority @default(NORMAL)
-  data         Json?
-  actionUrl    String?
+  status       String               @default("UNREAD") // UNREAD | READ | ARCHIVED
+  sourceType   String?              // "WHATSAPP" | "EMAIL" | "PUSH" | "SMS" | "IN_APP" | "SYSTEM"
+  sourceId     String?              // ID do recurso que originou a notificação
+  actionUrl    String?              // URL de ação ao clicar na notificação
   readAt       DateTime?
   expiresAt    DateTime?
+  data         Json?                // Dados adicionais da notificação
+  metadata     Json?                // Metadados adicionais da notificação
   createdAt    DateTime             @default(now())
 
   tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade, map: "tenant_notifications")
@@ -1485,6 +1491,7 @@ model Notification {
 
   @@index([tenantId, recipientId, readAt])
   @@index([tenantId, category])
+  @@index([tenantId, sourceType, sourceId])
   @@map("notifications")
 }
 
