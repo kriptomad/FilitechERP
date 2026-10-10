@@ -4,7 +4,7 @@
 //
 // Sem isso, um Pix não pago continua "PENDING" no painel para sempre e a
 // assinatura fica presa em PAST_DUE sem que o usuário saiba que o prazo
-// acabou. Roda a cada hora.
+// acabou. A Vercel Cron dispara uma vez ao dia (Hobby: limite de 1×/dia).
 
 import { NextResponse } from 'next/server';
 import { prismaUnscoped } from '@/server/db';
@@ -13,6 +13,10 @@ import { invalidateModulesCache } from '@/server/cache';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+/** Lotes de 200, no máximo 5 por execução — cobre 1.000/dia dentro do minuto. */
+const BATCH_SIZE = 200;
+const MAX_BATCHES = 5;
 
 export async function GET(request: Request) {
   const secret = env.cronSecret;
@@ -24,51 +28,64 @@ export async function GET(request: Request) {
   }
 
   const now = new Date();
+  const processedIds = new Set<string>();
+  const tenantIds = new Set<string>();
+  let batch = 0;
 
-  const expired = await prismaUnscoped.paymentCharge.findMany({
-    where: { status: 'PENDING', expiresAt: { lt: now } },
-    select: { id: true, tenantId: true, subscriptionId: true },
-    take: 200,
-  });
-
-  if (expired.length === 0) {
-    return NextResponse.json({
-      success: true,
-      data: { expired: 0, ranAt: now.toISOString() },
-      error: null,
+  for (; batch < MAX_BATCHES; batch += 1) {
+    const expired = await prismaUnscoped.paymentCharge.findMany({
+      where: { status: 'PENDING', expiresAt: { lt: now } },
+      select: { id: true, tenantId: true, subscriptionId: true },
+      take: BATCH_SIZE,
     });
+
+    if (expired.length === 0) break;
+
+    await prismaUnscoped.$transaction(
+      expired.flatMap((charge) => [
+        prismaUnscoped.paymentCharge.update({
+          where: { id: charge.id },
+          data: { status: 'EXPIRED', failureReason: 'Prazo de pagamento vencido' },
+        }),
+        ...(charge.subscriptionId
+          ? [
+              prismaUnscoped.billingEvent.create({
+                data: {
+                  subscriptionId: charge.subscriptionId,
+                  paymentChargeId: charge.id,
+                  provider: 'system',
+                  // Chave única por cobrança: um segundo disparo não duplica
+                  // evento (constraint @@unique[provider, externalEventKey]).
+                  externalEventKey: `expired_${charge.id}`,
+                  type: 'payment.expired',
+                  payload: { source: 'cron_expire_charges' },
+                },
+              }),
+            ]
+          : []),
+      ]),
+    );
+
+    for (const charge of expired) {
+      processedIds.add(charge.id);
+      tenantIds.add(charge.tenantId);
+    }
+
+    // Lote cheio significa que ainda pode haver mais: próxima volta.
+    if (expired.length < BATCH_SIZE) break;
   }
 
-  await prismaUnscoped.$transaction(
-    expired.flatMap((charge) => [
-      prismaUnscoped.paymentCharge.update({
-        where: { id: charge.id },
-        data: { status: 'EXPIRED', failureReason: 'Prazo de pagamento vencido' },
-      }),
-      ...(charge.subscriptionId
-        ? [
-            prismaUnscoped.billingEvent.create({
-              data: {
-                subscriptionId: charge.subscriptionId,
-                paymentChargeId: charge.id,
-                provider: 'system',
-                externalEventKey: `expired_${charge.id}`,
-                type: 'payment.expired',
-                payload: { source: 'cron_expire_charges' },
-              },
-            }),
-          ]
-        : []),
-    ]),
-  );
-
   // Invalidação após a transação: o gatekeeper não deve ler cache velho.
-  const tenants = [...new Set(expired.map((c) => c.tenantId))];
-  await Promise.all(tenants.map((tenantId) => invalidateModulesCache(tenantId)));
+  await Promise.all([...tenantIds].map((tenantId) => invalidateModulesCache(tenantId)));
 
   return NextResponse.json({
     success: true,
-    data: { expired: expired.length, tenants: tenants.length, ranAt: now.toISOString() },
+    data: {
+      expired: processedIds.size,
+      tenants: tenantIds.size,
+      batches: processedIds.size > 0 ? batch + 1 : 0,
+      ranAt: now.toISOString(),
+    },
     error: null,
   });
 }

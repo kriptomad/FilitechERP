@@ -11,6 +11,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { DomainError } from '../api-envelope';
 import { assertCreditAvailable } from './admin-clients';
+import { accrueLoyaltyPoints } from './loyalty';
 
 type Tx = Prisma.TransactionClient;
 
@@ -361,6 +362,17 @@ export async function createSale(
           tefAuthorizationCode: payment.tefAuthorizationCode ?? null,
           idempotencyKey: `${input.idempotencyKey}:pay:${index}`,
         },
+      });
+    }
+
+    // Fidelidade (Cap. 4.1.1): os pontos nascem na MESMA transação da venda.
+    // Fora dela, um rollback de venda deixaria pontos órfãos de um cliente.
+    if (input.clientId) {
+      await accrueLoyaltyPoints(tx, {
+        tenantId,
+        clientId: input.clientId,
+        saleId: sale.id,
+        amount: totalAmount,
       });
     }
 

@@ -1,7 +1,7 @@
 'use client';
 // src/app/app/contabilidade/page.tsx — Cap. 21.18
 //
-// Módulo Escritório de Contabilidade. Quatro blocos, todos com dados reais:
+// Módulo Escritório de Contabilidade. Cinco abas, todas com dados reais:
 //
 //   • Vínculos   — o que existe hoje entre o tenant e um escritório, com o
 //                  histórico de eventos (21.18.3) e as ações de aceite/revogar.

@@ -17,6 +17,10 @@
     {
       "path": "/api/cron/accounting-tasks",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/loyalty-expire",
+      "schedule": "0 4 * * *"
     }
   ],
 

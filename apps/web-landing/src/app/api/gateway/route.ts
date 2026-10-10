@@ -10,7 +10,11 @@
 // Se a chave viesse do cliente e fosse gravada aqui, qualquer usuário logado
 // poderia apontar as cobranças para a própria conta — por isso a separação.
 import { NextResponse } from 'next/server';
-import { jsonError, jsonSuccess } from '@/server/api-envelope';
+import { apiSuccess, jsonError } from '@/server/api-envelope';
+import { requireSession } from '@/server/session';
+import { roleHasPermission } from '@/server/gatekeeper';
+import { requestFingerprint, writeAuditLog } from '@/server/audit';
+import { handle } from '@/server/handler';
 import { resolveGateway, gatewayDisplayName } from '@/server/payment/gateway';
 
 export const dynamic = 'force-dynamic';
@@ -46,12 +50,21 @@ function currentStatus(): GatewayStatus {
   };
 }
 
-export async function GET() {
-  return jsonSuccess(currentStatus());
-}
+// Sem sessão, qualquer pessoa anônima descobriria o nome do PSP em uso. Sem
+// `billing:manage`, um operador de caixa estaria vendo (e testando) a
+// infraestrutura de cobrança da empresa.
+export const GET = handle(async (request: Request) => {
+  await requireSession(request);
+  return apiSuccess(currentStatus());
+});
 
-/** Teste de conexão real: chama a API do provedor e devolve o resultado. */
-export async function POST(request: Request) {
+export const POST = handle(async (request: Request) => {
+  const session = await requireSession(request);
+
+  if (!roleHasPermission(session.role, 'billing:manage')) {
+    return jsonError(403, 'FORBIDDEN', 'Apenas o proprietário ou gerente pode testar o PSP.');
+  }
+
   const gateway = resolveGateway();
 
   if (!gateway) {
@@ -63,17 +76,58 @@ export async function POST(request: Request) {
   }
 
   const started = Date.now();
-  const result = await gateway.testConnection();
+
+  // A chamada ao PSP pode falhar por rede/HTTP — isso NÃO é um erro interno do
+  // servidor, é um resultado negativo do teste. Devolver 500 confundiria o
+  // operador; devolver `ok:false` com 502 diz exatamente o que aconteceu.
+  let result: { ok: boolean; message: string; latencyMs?: number };
+  try {
+    result = await gateway.testConnection();
+  } catch (err) {
+    result = {
+      ok: false,
+      message:
+        err instanceof Error
+          ? `Falha ao contatar o ${gatewayDisplayName()}: ${err.message}`
+          : `Falha ao contatar o ${gatewayDisplayName()}.`,
+      latencyMs: Date.now() - started,
+    };
+  }
+
+  await writeAuditLog({
+    tenantId: session.tenantId,
+    userId: session.userId,
+    action: 'GATEWAY_TESTED',
+    entityType: 'PaymentGateway',
+    entityId: gateway.name,
+    after: { ok: result.ok, latencyMs: result.latencyMs ?? Date.now() - started },
+    ...requestFingerprint(request),
+  });
+
+  // `api()` do frontend lança quando `success` é falso OU o status não é 2xx —
+  // e nesse caso lê `error.message`. Devolver `success:true` com `ok:false` em
+  // 502 faria a tela mostrar "Bad Gateway" no lugar do motivo real (token
+  // inválido, 401 do PSP, rede). O envelope de erro é o que leva a mensagem.
+  if (!result.ok) {
+    return NextResponse.json(
+      {
+        ...apiSuccess(null),
+        success: false,
+        error: { code: 'GATEWAY_UNREACHABLE', message: result.message },
+      },
+      { status: 502 },
+    );
+  }
 
   return NextResponse.json(
-    jsonSuccess({
+    apiSuccess({
       provider: gateway.name,
       providerLabel: gatewayDisplayName(),
-      ok: result.ok,
+      ok: true,
       message: result.message,
       latencyMs: result.latencyMs ?? Date.now() - started,
       testedAt: new Date().toISOString(),
     }),
-    { status: result.ok ? 200 : 502 },
+    { status: 200 },
   );
-}
+});
