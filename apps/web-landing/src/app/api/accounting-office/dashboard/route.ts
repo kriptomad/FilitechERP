@@ -59,7 +59,7 @@ export const GET = handle(async (request: Request) => {
 
   const now = Date.now();
   const lateOrUpcoming = tasks.filter(
-    (task) =>
+    (task: { status: string; dueDate: Date }) =>
       (task.status === 'PENDING' || task.status === 'LATE') &&
       task.dueDate.getTime() <= now + 7 * 24 * 60 * 60 * 1000,
   ).length;
