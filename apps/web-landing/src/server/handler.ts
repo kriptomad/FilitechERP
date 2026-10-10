@@ -26,9 +26,14 @@ export function handle<A extends unknown[]>(
     try {
       const result = await fn(request, ...args);
 
-      // O handler já devolveu uma resposta (ex.: cookie, PDF, 201 manual).
-      if (result instanceof NextResponse) {
-        return result;
+      // O handler já devolveu uma resposta (cookie, PDF, 201 manual).
+      //
+      // O teste precisa ser `Response`, e não `NextResponse`: `Response.json()`
+      // devolve um `Response` comum, que NÃO é instanceof NextResponse. Sem
+      // isto, toda rota que respondia 201 manualmente era re-empacotada em
+      // `{success:true,data:<Response>}` e o cliente via `data: {}`.
+      if (result instanceof Response) {
+        return result as NextResponse;
       }
 
       // Devolveu JSON puro — embrulha no envelope padrão (Cap. 9.1).

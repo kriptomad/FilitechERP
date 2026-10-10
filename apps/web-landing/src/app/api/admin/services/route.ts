@@ -1,16 +1,59 @@
-import { NextRequest, NextResponse } from 'next/server';
+// src/app/api/admin/services/route.ts — Cap. 11 (nicho de serviços)
+//
+// Antes devolvia DEMO_SERVICES e o POST fabricava `id: String(Date.now())`.
+import { prismaUnscoped } from '@/server/db';
+import { requireSession } from '@/server/session';
+import { gatekeeper } from '@/server/gatekeeper';
+import { readJson, requireString, requireNumber, optionalString } from '@/server/request';
+import { writeAuditLog, requestFingerprint } from '@/server/audit';
+import { createService, listServices } from '@/server/services/admin-services';
+import { handle } from '@/server/handler';
 
-const DEMO_SERVICES = [
-  { id: '1', name: 'Troca de Óleo', nicheTag: 'AUTOMOTIVE_WORKSHOP', basePrice: 89.9, estimatedDurationMinutes: 30, commissionPercentage: 10, active: true, appointmentCount: 45, packageCount: 12 },
-  { id: '2', name: 'Alinhamento e Balanceamento', nicheTag: 'AUTOMOTIVE_WORKSHOP', basePrice: 120.0, estimatedDurationMinutes: 45, commissionPercentage: 15, active: true, appointmentCount: 23, packageCount: 8 },
-];
+export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  return NextResponse.json({ success: true, data: DEMO_SERVICES });
+export const GET = handle(async (request: Request) => {
+  const session = await requireSession(request);
+  await gatekeeper(session, { moduleCode: 'crm' });
+
+  const services = await listServices(prismaUnscoped, session.tenantId);
+  return { success: true, data: services, error: null };
+});
+
+interface CreateBody {
+  name?: unknown;
+  nicheTag?: unknown;
+  basePrice?: unknown;
+  estimatedDurationMinutes?: unknown;
+  commissionPercentage?: unknown;
+  active?: unknown;
 }
 
-export async function POST(request: Request) {
-  const body = await request.json();
-  const newService = { id: String(Date.now()), ...body, appointmentCount: 0, packageCount: 0, createdAt: new Date().toISOString() };
-  return NextResponse.json({ success: true, data: newService }, { status: 201 });
-}
+export const POST = handle(async (request: Request) => {
+  const session = await requireSession(request);
+  await gatekeeper(session, { moduleCode: 'crm', requiredPermission: 'crm:write' });
+
+  const body = await readJson<CreateBody>(request);
+
+  const created = await createService(prismaUnscoped, session.tenantId, {
+    name: requireString(body.name, 'nome', { min: 2, max: 160 }),
+    nicheTag: optionalString(body.nicheTag, 'nicho', 40) ?? 'GERAL',
+    basePrice: requireNumber(body.basePrice ?? 0, 'preço'),
+    estimatedDurationMinutes:
+      typeof body.estimatedDurationMinutes === 'number' ? body.estimatedDurationMinutes : 30,
+    commissionPercentage:
+      typeof body.commissionPercentage === 'number' ? body.commissionPercentage : undefined,
+    active: body.active !== false,
+  });
+
+  await writeAuditLog({
+    tenantId: session.tenantId,
+    userId: session.userId,
+    action: 'SETTINGS_UPDATED',
+    entityType: 'Service',
+    entityId: created.id,
+    after: { name: created.name, basePrice: created.basePrice },
+    ...requestFingerprint(request),
+  });
+
+  return Response.json({ success: true, data: created, error: null }, { status: 201 });
+});

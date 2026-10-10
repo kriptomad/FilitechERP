@@ -7,7 +7,7 @@
 // A aprovação por link (Cap. 6.4) usa UPDATE condicional: `WHERE status =
 // AWAITING_APPROVAL AND budgetValidUntil > now()`. Dois cliques simultâneos no
 // link do WhatsApp não geram dupla aprovação nem dupla baixa de peça.
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { DomainError } from '../api-envelope';
 import { absoluteUrl } from '../env';
@@ -31,26 +31,39 @@ export interface WorkOrderRow {
   itemCount: number;
 }
 
-/** Protocolo `OS-AAAA-NNNNNN` — sequencial real por ano, sem colisão. */
-async function nextProtocol(db: PrismaClient, tenantId: string): Promise<string> {
-  const year = new Date().getFullYear();
-  const prefix = `OS-${year}-`;
-  const last = await db.workOrder.findFirst({
-    where: { tenantId, equipmentDescription: { not: '' } },
-    orderBy: { createdAt: 'desc' },
-    select: { createdAt: true },
+/**
+ * Índice de protocolo `OS-AAAA-NNNNNN` — sequencial REAL por ano, estável.
+ *
+ * Por que não usar o `id` (como fazia a versão anterior): `OS-2026-3F8A21`
+ * não é um número de ordem — é um pedaço de UUID. O Cap. 4.2 pede uma ordem
+ * cronológica que o cliente e o técnico conseguem ler e citar no WhatsApp.
+ *
+ * Implementação: uma única consulta projetando `id` e `createdAt` do tenant,
+ * ordenada cronologicamente, e a posição de cada OS vira o número. Como as OS
+ * só são acrescentadas ao final, a posição de uma OS existente nunca muda — o
+ * protocolo é estável entre consultas, sem coluna extra na tabela.
+ */
+async function buildProtocolIndex(
+  db: PrismaClient,
+  tenantId: string,
+): Promise<Map<string, string>> {
+  const orders = await db.workOrder.findMany({
+    where: { tenantId },
+    select: { id: true, createdAt: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
 
-  const count = await db.workOrder.count({ where: { tenantId } });
-  void last;
+  const counterByYear = new Map<number, number>();
+  const index = new Map<string, string>();
 
-  // Sequencial por ano: conta apenas as OS criadas neste ano.
-  const yearStart = new Date(`${year}-01-01T00:00:00.000Z`);
-  const yearCount = await db.workOrder.count({
-    where: { tenantId, createdAt: { gte: yearStart } },
-  });
+  for (const order of orders) {
+    const year = order.createdAt.getFullYear();
+    const sequence = (counterByYear.get(year) ?? 0) + 1;
+    counterByYear.set(year, sequence);
+    index.set(order.id, `OS-${year}-${String(sequence).padStart(6, '0')}`);
+  }
 
-  return `${prefix}${String(Math.max(yearCount, count > 0 ? yearCount + 1 : 1)).padStart(6, '0')}`;
+  return index;
 }
 
 export async function listWorkOrders(
@@ -69,28 +82,38 @@ export async function listWorkOrders(
     take: 100,
   });
 
-  return orders.map(serialize);
+  if (orders.length === 0) return [];
+
+  const protocols = await buildProtocolIndex(db, tenantId);
+  return orders.map((order) => serialize(order, protocols.get(order.id)));
 }
 
-function serialize(order: {
-  id: string;
-  createdAt: Date;
-  client: { name: string };
-  equipmentDescription: string;
-  reportedIssue: string;
-  status: string;
-  diagnosisNotes: string | null;
-  assignedTechnicianId: string | null;
-  assignedTechnician: { name: string } | null;
-  budgetValidUntil: Date | null;
-  warrantyDays: number | null;
-  deliveredAt: Date | null;
-  items: { unitPrice: Prisma.Decimal; quantity: Prisma.Decimal }[];
-}): WorkOrderRow {
+function serialize(
+  order: {
+    id: string;
+    createdAt: Date;
+    client: { name: string };
+    equipmentDescription: string;
+    reportedIssue: string;
+    status: string;
+    diagnosisNotes: string | null;
+    assignedTechnicianId: string | null;
+    assignedTechnician: { name: string } | null;
+    budgetValidUntil: Date | null;
+    warrantyDays: number | null;
+    deliveredAt: Date | null;
+    items: { unitPrice: Prisma.Decimal; quantity: Prisma.Decimal }[];
+    clientId?: string;
+  },
+  protocol?: string,
+): WorkOrderRow {
   return {
     id: order.id,
-    protocol: `OS-${order.createdAt.getFullYear()}-${order.id.slice(0, 6).toUpperCase()}`,
-    clientId: '',
+    // Fallback determinístico quando o índice ainda não foi computado (uma OS
+    // recém-criada): nunca `Math.random()` nem hash opaco de UUID.
+    protocol:
+      protocol ??
+      `OS-${order.createdAt.getFullYear()}-${order.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`,
     clientName: order.client.name,
     equipmentDescription: order.equipmentDescription,
     reportedIssue: order.reportedIssue,
@@ -107,6 +130,7 @@ function serialize(order: {
     createdAt: order.createdAt.toISOString(),
     deliveredAt: order.deliveredAt?.toISOString() ?? null,
     itemCount: order.items.length,
+    clientId: order.clientId ?? '',
   };
 }
 
@@ -157,10 +181,11 @@ export async function createWorkOrder(
     },
   });
 
-  const protocol = await nextProtocol(db, tenantId);
-  void protocol;
-
-  return { ...serialize(order), clientId: input.clientId };
+  const protocols = await buildProtocolIndex(db, tenantId);
+  return {
+    ...serialize(order, protocols.get(order.id)),
+    clientId: order.clientId,
+  };
 }
 
 export interface BudgetItemInput {
@@ -295,8 +320,6 @@ export async function approveBudgetByToken(
     throw new DomainError('ALREADY_PROCESSED', 'Este orçamento já foi processado.', 409);
   }
 
-  void randomUUID;
-
   return { workOrderId: order.id, approvedAt: approvedAt.toISOString() };
 }
 
@@ -320,8 +343,10 @@ export async function getPublicBudget(
 
   if (!order) throw new DomainError('TOKEN_NOT_FOUND', 'Link de aprovação inválido.', 404);
 
+  const protocols = await buildProtocolIndex(db, order.tenantId);
+
   return {
-    protocol: `OS-${order.createdAt.getFullYear()}-${order.id.slice(0, 6).toUpperCase()}`,
+    protocol: protocols.get(order.id) ?? `OS-${order.createdAt.getFullYear()}-000001`,
     equipment: order.equipmentDescription,
     items: order.items.map((i) => ({
       description: i.description,
@@ -378,5 +403,6 @@ export async function advanceStatus(
     },
   });
 
-  return { ...serialize(updated), clientId: updated.clientId };
+  const protocols = await buildProtocolIndex(db, tenantId);
+  return { ...serialize(updated, protocols.get(updated.id)), clientId: updated.clientId };
 }

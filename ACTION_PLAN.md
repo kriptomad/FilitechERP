@@ -1,325 +1,185 @@
-# PLANO DE AÇÃO — FILITECH ERP (Vercel + Neon)
+# PLANO DE AÇÃO MASSIVO — FILITECH ERP (100% FUNCIONAL)
 
-> **Objetivo:** Sistema 100% funcional, production-ready, sem mocks.
-> **Stack de Deploy:** Vercel (Serverless Functions) + Neon (PostgreSQL).
-> **Data de início:** 2026-10-09
+## 🔴 CRÍTICO — FAZER AGORA (Bloqueiam tudo)
 
----
+### 1. CONFIGURAR VARIÁVEIS NA VERCEL (URGENTE)
+| Variável | Status | Ação |
+|----------|--------|------|
+| `DATABASE_URL` | ❌ Não configurado | Copiar do Neon (pooled) |
+| `JWT_PRIVATE_KEY` | ❌ Não configurado | Gerar: `openssl genrsa -out private.pem 2048 && openssl rsa -in private.pem -pubout -out public.pem && base64 -w 0 private.pem` |
+| `JWT_PUBLIC_KEY` | ❌ Não configurado | `base64 -w 0 public.pem` |
+| `BILLING_GATEWAY` | ❌ Não configurado | `mercadopago` ou `asaas` |
+| `MERCADO_PAGO_ACCESS_TOKEN` | ❌ Não configurado | Pegar no painel MP |
+| `ASAAS_API_KEY` | ❌ Não configurado | Pegar no painel Asaas |
+| `CRON_SECRET` | ❌ Não configurado | `openssl rand -hex 32` |
+| `NEXT_PUBLIC_APP_URL` | ❌ Não configurado | `https://seu-dominio.vercel.app` |
 
-## DIAGNÓSTICO COMPLETO
-
-### Arquitetura Atual
-
+### 2. SEED DO BANCO NEON (OBRIGATÓRIO)
+```bash
+pnpm --filter @filitech/db db:push
+pnpm --filter @filitech/db db:seed
 ```
-filitech-erp-starter/
-├── apps/
-│   ├── api/              → Express + Prisma (NÃO roda na Vercel)
-│   ├── web-landing/      → Next.js 14 (landing + API routes mock)
-│   └── web-app/          → Vite + React 18 (SPA do ERP)
-├── packages/
-│   ├── db/               → Prisma schema (87 models, 47 enums)
-│   ├── shared/           → Tipos compartilhados
-│   ├── ui/               → Design system
-│   └── config/           → tsconfig, eslint
-├── vercel.json           → Configuração Vercel (corrigida)
-└── .env                  → Variáveis de ambiente local
+Isso cria: planos (FREE/BASIC/PRO), módulos, nichos, templates de produtos.
+
+---
+
+## 🟠 ALTA PRIORIDADE — FAZER HOJE
+
+### 1. Corrigir Login (PRIORIDADE MÁXIMA)
+- [ ] Verificar se `JWT_PRIVATE_KEY` e `JWT_PUBLIC_KEY` estão na Vercel
+- [ ] Verificar se `DATABASE_URL` aponta para Neon pooled
+- [ ] Testar login com `demo@filitech.dev` / `Demo@123`
+- [ ] Se falhar: ver logs da Vercel Function Logs
+
+### 2. Corrigir Signup (não faz nada)
+- Verificar se checkboxes de termos/privacidade são obrigatórios no frontend
+- Verificar se `termsAccepted` e `privacyPolicyAccepted` são enviados
+- Verificar se `nicheCode` é enviado (obrigatório para criar tenant com template)
+
+### 3. Checkout Real (não ativa sem pagar)
+- [ ] Configurar `BILLING_GATEWAY=mercadopago` na Vercel
+- [ ] Adicionar `MERCADO_PAGO_ACCESS_TOKEN` e `MERCADO_PAGO_WEBHOOK_SECRET`
+- [ ] Testar checkout com PIX (gerar QR Code)
+- [ ] Verificar webhook `/api/webhooks/billing` processa `payment.succeeded`
+
+### 4. Painel Admin (parametrização)
+- [ ] Nichos: criar `/api/admin/niches` + UI no painel
+- [ ] Módulos: ativar/desativar via `/api/billing/modules/:code/activate`
+- [ ] Clientes: CRUD completo
+- [ ] Serviços: CRUD com nicho
+- [ ] Faturas: listar, pagar, cancelar
+
+### 5. Seleção de Nicho (Onboarding)
+- [ ] Página `/cadastro` mostra cards de nicho clicáveis
+- [ ] Ao selecionar, carrega template de produtos do nicho
+- [ ] Salva `nicheCode` no tenant
+- [ ] Carrega produtos template do nicho automaticamente
+
+### 6. Tier Free (básico)
+- [ ] Plano FREE no seed (R$ 0, 100 vendas, 1 user, 200 SKUs)
+- [ ] Checkout FREE ativa sem gateway
+- [ ] Limites visíveis no painel (`/api/billing/usage`)
+
+### 7. Checkout Real (não mock)
+- [ ] Configurar `BILLING_GATEWAY=mercadopago` + `MERCADO_PAGO_ACCESS_TOKEN`
+- [ ] Checkout cria `PaymentCharge` PENDING
+- [ ] Retorna QR Code PIX / Link checkout
+- [ ] Webhook `/api/webhooks/billing` processa `payment.succeeded`
+- [ ] Webhook chama `confirmCharge()` → ativa módulos + subscription ACTIVE
+
+### 8. Painel Admin (parametrização completa)
+- [ ] Aba "Módulos": listar, ativar/desativar, ver preço
+- [ ] Aba "Cobrança": faturas, uso, limites
+- [ ] Aba "Clientes": CRUD, limite crédito
+- [ ] Aba "Serviços": CRUD com nicho
+- [ ] Aba "Faturas": listar, baixar PDF
+- [ ] Aba "Equipe": convidar, editar papel, reset senha
+
+---
+
+## 🟡 MÉDIA PRIORIDADE — ESTA SEMANA
+
+### 9. Nichos Interativos (Landing)
+- [ ] Cards clicáveis → abrem painel lateral com features
+- [ ] Mostrar módulos sugeridos, template de produtos
+- [ ] Botão "Começar com [Nicho]" → `/cadastro?nicho=X`
+
+### 10. Tier Free (básico)
+- Plano FREE no seed (R$ 0, 100 vendas, 1 user, 200 SKUs)
+- Limites visíveis no painel (`/api/billing/usage`)
+
+### 11. Escritório de Contabilidade Virtual
+- Modelo `AccountingFirmProfile` (já no schema)
+- `AccountingEngagement` (procuração eletrônica)
+- `AccountingTask` (tarefas recorrentes por competência)
+- Marketplace de contadores no painel admin
+
+### 11. NFe/NFSe (Focus NFe)
+- Integração `fiscal-emission.service.ts` → Focus NFe
+- Webhook de status (autorizada/rejeitada)
+- Contingência offline (Cap. 10.2)
+
+### 12. PDV Offline-First
+- IndexedDB (Dexie) + Service Worker
+- Sincronização em background
+- Fechamento de caixa cega (gaveta cega)
+
+---
+
+## 🟢 BAIXA PRIORIDADE — PRÓXIMAS SPRINTS
+
+### 13. Multi-filial / Multi-tenant
+- `parentTenantId` no Tenant
+- Dashboard consolidado
+
+### 14. App Mobile (React Native + Expo)
+- PDV móvel
+- Aprovação orçamentos via push
+
+### 15. Marketplace de Apps
+- API Keys por tenant
+- Webhooks configuráveis
+
+---
+
+## CHECKLIST DE DEPLOY (Vercel + Neon)
+
+### Variáveis Obrigatórias na Vercel
+```bash
+DATABASE_URL="postgresql://...neon.tech/filitech_erp?sslmode=require"
+JWT_PRIVATE_KEY="base64..."
+JWT_PUBLIC_KEY="base64..."
+BILLING_GATEWAY="mercadopago"
+MERCADO_PAGO_ACCESS_TOKEN="APP_USR-..."
+MERCADO_PAGO_WEBHOOK_SECRET="..."
+ASAAS_API_KEY=""
+ASAAS_WEBHOOK_SECRET=""
+CRON_SECRET="..."
+NEXT_PUBLIC_APP_URL="https://seu-dominio.vercel.app"
 ```
 
-### Problemas Críticos Identificados
-
-| # | Problema | Impacto | Status |
-|---|----------|---------|--------|
-| 1 | `ERP_APP_URL` vazio → botão "Entrar" vira `href=""` → volta para landing | Login inacessível | ✅ Corrigido |
-| 2 | API routes mock (dados hardcoded) | Nada funciona de verdade | 🔄 Em correção |
-| 3 | Express API não roda na Vercel | API real inacessível | 🔄 Migração necessária |
-| 4 | Sem seleção de nicho no cadastro | Conta genérica | ✅ Corrigido |
-| 5 | Sem tier FREE implementado | Sem plano gratuito | ✅ Corrigido |
-| 6 | Sem escritório de contabilidade virtual | Módulo ausente | ⬜ Pendente |
-| 7 | Sem 2FA completo | Segurança incompleta | ⬜ Pendente |
-| 8 | Sem notificações multi-canal | Usuário não recebe alertas | ⬜ Pendente |
-| 9 | Sem jobs/cron (dunning, cobrança) | Cobrança não funciona | ✅ Parcial |
-| 10 | Sem busca global (Ctrl+K) | UX incompleta | ⬜ Pendente |
-| 11 | Sem relatórios self-service | BI ausente | ⬜ Pendente |
-| 12 | Sem conciliação bancária | Financeiro incompleto | ⬜ Pendente |
-| 13 | Sem integração fiscal (Focus NFe) | Fiscal não funciona | ⬜ Pendente |
-| 14 | Sem integração WhatsApp | Comunicação ausente | ⬜ Pendente |
-| 15 | Sem integração Pluggy (Open Finance) | Dados bancários ausentes | ⬜ Pendente |
+### Deploy Checklist
+- [ ] `pnpm db:push` no Neon
+- [ ] `pnpm db:seed` 
+- [ ] Build passa: `pnpm build`
+- [ ] Deploy Vercel
+- [ ] Testar login: `demo@filitech.dev` / `Demo@123`
+- [ ] Testar signup com nicho
+- [ ] Testar checkout PIX (sandbox)
+- [ ] Verificar webhook billing
 
 ---
 
-## FASE 0 — CORREÇÕES CRÍTICAS (BLOQUEIAM TUDO)
+## COMANDOS ÚTEIS
 
-### 0.1 ERP_APP_URL
-**Arquivo:** `apps/web-landing/src/lib/api.ts:65`
-```ts
-// Antes:
-export const ERP_APP_URL = process.env.NEXT_PUBLIC_ERP_APP_URL ?? '';
-// Depois:
-export const ERP_APP_URL = '/app';
+```bash
+# Desenvolvimento local
+pnpm dev
+
+# Build
+pnpm build
+
+# Banco
+pnpm --filter @filitech/db db:push
+pnpm --filter @filitech/db db:seed
+pnpm --filter @filitech/db db:studio
+
+# Testes
+pnpm test
+pnpm --filter @filitech/web-landing exec tsc --noEmit
 ```
 
-### 0.2 verificador de build
-Rodar `pnpm --filter @filitech/web-landing exec tsc --noEmit` e corrigir todos os erros de sintaxe.
+---
 
-### 0.3 Remover mocks de API routes
-Todos os arquivos em `web-landing/src/app/api/**` que retornam dados hardcoded devem ser reescritos para usar Prisma/Neon.
+## PRIORIDADE ABSOLUTA AGORA
 
-### 0.4 JWT sem filesystem
-`server/jwt.ts` já usa `jose` + env vars. Verificar se está sendo importado corretamente.
-
-### 0.5 next.config.js
-Remover a regra que desabilita rewrites em produção.
+1. **Configure as variáveis na Vercel** (JWT keys, DATABASE_URL, BILLING_GATEWAY)
+2. **Rode seed no Neon** (`pnpm db:seed`)
+3. **Deploy** na Vercel
+4. **Teste login** com `demo@filitech.dev` / `Demo@123`
+5. **Teste signup** com nicho selecionado
+6. **Teste checkout** PIX (sandbox Mercado Pago)
 
 ---
 
-## FASE 1 — INFRAESTRUTURA SERVER-SIDE (web-landing/src/server/)
-
-### Arquivos a criar:
-- `db.ts` — PrismaClient singleton ✅ (já existe)
-- `jwt.ts` — sign/verify com jose ✅ (já existe)
-- `password.ts` — argon2 ✅ (já existe)
-- `session.ts` — cookie handling ✅ (já existe)
-- `tenant-context.ts` — AsyncLocalStorage ✅ (já existe)
-- `gatekeeper.ts` — feature gating + RBAC ✅ (já existe)
-- `handler.ts` — wrapper de erro ✅ (já existe)
-- `cache.ts` — cache de módulos ✅ (já existe)
-- `api-envelope.ts` — envelope padrão ✅ (já existe)
-- `billing-catalog.ts` — catálogo de billing ✅ (já existe)
-- `audit.ts` — auditoria ✅ (já existe)
-- `payment/gateway.ts` — Mercado Pago/Asaas adapter ✅ (já existe)
-- `payment/confirm-charge.ts` — confirmação de pagamento ✅ (já existe)
-- `services/admin-clients.ts` — CRUD clientes ✅ (já existe)
-- `services/admin-services.ts` — CRUD serviços ✅ (já existe)
-- `services/admin-receivables.ts` — contas a receber ✅ (já existe)
-- `services/contracts.ts` — contratos ✅ (já existe)
-- `services/contract-pdf.ts` — PDF de contrato ✅ (já existe)
-- `services/sales.ts` — vendas PDV ✅ (já existe)
-- `services/work-orders.ts` — ordens de serviço ✅ (já existe)
-
----
-
-## FASE 2 — API ROUTES REAIS (web-landing/src/app/api/)
-
-### Auth
-- [x] `POST /api/auth/login` ✅
-- [x] `POST /api/auth/signup` ✅
-- [x] `GET /api/auth/me` ✅
-- [x] `POST /api/auth/logout` ✅
-- [x] `POST /api/auth/password/forgot` ✅
-- [x] `POST /api/auth/password/reset` ✅
-- [x] `PATCH /api/auth/niche` ✅
-- [ ] `POST /api/auth/2fa/enroll/start` ⬜
-- [ ] `POST /api/auth/2fa/enroll/confirm` ⬜
-- [ ] `POST /api/auth/2fa/disable` ⬜
-- [ ] `POST /api/auth/2fa/verify` ⬜
-- [ ] `GET /api/auth/2fa/status` ⬜
-- [ ] `GET /api/auth/sessions` ⬜
-- [ ] `DELETE /api/auth/sessions/:id` ⬜
-- [ ] `POST /api/auth/sessions/:id/revoke` ⬜
-
-### Billing
-- [x] `GET /api/billing/catalog` ✅
-- [x] `POST /api/billing/checkout` ✅ (agora usa PSP)
-- [x] `GET /api/billing/subscription` ✅
-- [x] `GET /api/billing/invoices` ✅
-- [x] `GET /api/billing/usage` ✅
-- [x] `GET /api/billing/charge/:id` ✅
-- [ ] `POST /api/billing/subscription/cancel` ⬜
-- [ ] `POST /api/billing/subscription/change-plan` ⬜
-- [ ] `POST /api/billing/subscription/keep` ⬜
-
-### Users / Equipe
-- [x] `GET /api/users` ✅
-- [x] `POST /api/users` ✅
-- [x] `PATCH /api/users/:id` ✅
-- [x] `DELETE /api/users/:id` ✅
-- [ ] `POST /api/users/:id/reset-password` ⬜
-
-### Admin Portal
-- [x] `GET/POST /api/admin/clients` ✅
-- [x] `PATCH/DELETE /api/admin/clients/:id` ✅
-- [x] `GET/POST /api/admin/services` ✅
-- [x] `PATCH/DELETE /api/admin/services/:id` ✅
-- [x] `GET/POST /api/admin/receivables` ✅
-- [x] `POST /api/admin/receivables/:id/pay` ✅
-- [x] `POST /api/admin/receivables/:id/cancel` ✅
-
-### Products / Estoque
-- [x] `GET/POST /api/products` ✅
-- [ ] `PATCH /api/products/:id` ⬜
-- [ ] `DELETE /api/products/:id` ⬜
-- [ ] `GET /api/stock/movements` ⬜
-- [ ] `POST /api/stock/adjust` ⬜
-- [ ] `GET /api/stock/expiry-alerts` ⬜
-- [ ] `GET /api/stock/purchase-suggestions` ⬜
-- [ ] `POST /api/purchases/orders` ⬜
-- [ ] `GET /api/purchases/orders` ⬜
-- [ ] `POST /api/purchases/orders/:id/receive` ⬜
-
-### Sales / PDV
-- [x] `POST /api/sales` ✅
-- [x] `GET /api/sales` ✅
-- [ ] `POST /api/sales/:id/refund` ⬜
-- [ ] `GET /api/sales/report` ⬜
-- [ ] `GET /api/sales/abc-curve` ⬜
-
-### Work Orders
-- [x] `POST /api/work-order` ✅
-- [x] `GET /api/work-order` ✅
-- [ ] `PATCH /api/work-order/:id` ⬜
-- [ ] `POST /api/work-order/:id/status` ⬜
-- [ ] `GET /api/work-order/:id` ⬜
-- [x] `POST /api/work-order/:id/budget` ✅
-- [x] `POST /api/work-order/approve` ✅
-- [ ] `GET /api/work-order/:id/events` ⬜
-
-### Cash Register
-- [x] `GET/POST /api/cash-register` ✅
-- [x] `PATCH /api/cash-register` ✅ (close)
-- [ ] `POST /api/cash-register/movements` ⬜
-- [ ] `GET /api/cash-register/movements` ⬜
-
-### Notifications
-- [ ] `GET /api/notifications` ⬜
-- [ ] `POST /api/notifications/read` ⬜
-- [ ] `POST /api/notifications/read-all` ⬜
-- [ ] `GET /api/notifications/unread-count` ⬜
-- [ ] `PATCH /api/notifications/preferences` ⬜
-
-### Financial
-- [ ] `GET /api/financial/dre` ⬜
-- [ ] `GET /api/financial/cash-flow-projection` ⬜
-- [ ] `POST /api/financial/bank-accounts` ⬜
-- [ ] `GET /api/financial/bank-accounts` ⬜
-- [ ] `POST /api/financial/bank-accounts/:id/reconcile` ⬜
-- [ ] `GET /api/financial/sped-ecd/:year` ⬜
-
-### Fiscal
-- [ ] `POST /api/fiscal/emit-nfce` ⬜
-- [ ] `POST /api/fiscal/nfe-import` ⬜
-- [ ] `GET /api/fiscal/documents` ⬜
-- [ ] `POST /api/fiscal/documents/:id/cancel` ⬜
-- [ ] `POST /api/fiscal/documents/:id/cc` ⬜ (carta de correção)
-
-### Reports
-- [ ] `GET /api/reports/self-service` ⬜
-- [ ] `POST /api/reports/self-service` ⬜
-- [ ] `GET /api/reports/scheduled` ⬜
-- [ ] `POST /api/reports/scheduled` ⬜
-- [ ] `GET /api/reports/dashboard` ⬜
-- [ ] `POST /api/reports/dashboard` ⬜
-
-### Tenant
-- [x] `GET /api/tenant/me` ✅
-- [ ] `PATCH /api/tenant/me` ⬜
-- [ ] `GET /api/tenant/export` ⬜
-
-### Search (Command Palette)
-- [ ] `GET /api/search` ⬜
-
-### Webhooks
-- [x] `POST /api/webhooks/billing` ✅
-- [x] `POST /api/webhooks/ifood` ✅
-- [ ] `POST /api/webhooks/pluggy` ⬜
-- [ ] `GET /api/webhooks/endpoints` ⬜
-- [ ] `POST /api/webhooks/endpoints` ⬜
-- [ ] `GET /api/webhooks/deliveries` ⬜
-
----
-
-## FASE 3 — FRONTEND ERP (web-landing/src/app/app/)
-
-### Páginas a criar:
-- `page.tsx` — Dashboard do ERP
-- `pdv/page.tsx` — PDV (frente de caixa)
-- `produtos/page.tsx` — Lista de produtos
-- `clientes/page.tsx` — Lista de clientes
-- `financeiro/page.tsx` — Visão financeira
-- `configuracoes/page.tsx` — Configurações
-
-### Componentes a criar:
-- `AppShell` — layout principal com sidebar ✅
-- `PdvScreen` — tela de PDV ⬜
-- `ProductsScreen` — lista de produtos ⬜
-- `ClientsScreen` — lista de clientes ⬜
-- `FinancialScreen` — visão financeira ⬜
-- `SettingsScreen` — configurações ⬜
-
----
-
-## FASE 4 — TIER FREE
-
-- Plano FREE já existe no seed ✅
-- Checkout de FREE ativa sem gateway ✅
-- Limites do Free visíveis no painel ✅
-
----
-
-## FASE 5 — ESCRITÓRIO DE CONTABILIDADE
-
-### Schema models (já existem):
-- `AccountingFirmProfile` ✅
-- `AccountingEngagement` ✅
-- `AccountingTask` ✅
-- `OfficialTaxDocument` ✅
-- `AccountingMarketplaceReview` ✅
-- `CompanyPartner` ⬜
-- `PartnerPayout` ⬜
-
-### API Routes a criar:
-- `POST /api/accounting/engagements`
-- `POST /api/accounting/engagements/:id/accept`
-- `POST /api/accounting/engagements/:id/revoke`
-- `GET /api/accounting/tasks`
-- `POST /api/accounting/tasks/:id/complete`
-- `GET /api/accounting/ecd/:year`
-- `GET /api/accounting/defis/:year`
-- `GET /api/accounting/marketplace`
-- `POST /api/accounting/reviews`
-
-### Frontend a criar:
-- `src/app/contabilidade/page.tsx`
-- `src/app/contabilidade/engajamentos/page.tsx`
-- `src/app/contabilidade/tarefas/page.tsx`
-- `src/app/contabilidade/documentos/page.tsx`
-- `src/app/contabilidade/marketplace/page.tsx`
-
----
-
-## FASE 6 — PAGAMENTO REAL
-
-- `server/payment/gateway.ts` ✅ (Mercado Pago + Asaas)
-- Checkout usa gateway ✅
-- Webhook confirma pagamento ✅
-- `confirmCharge()` promove para ACTIVE ✅
-
----
-
-## FASE 7 — DEPLOY
-
-1. Vercel: conectar repo GitHub
-2. Environment Variables:
-   - `DATABASE_URL` (Neon)
-   - `JWT_PRIVATE_KEY` (base64)
-   - `JWT_PUBLIC_KEY` (base64)
-   - `BILLING_GATEWAY` (mercadopago/asaas)
-   - `MERCADO_PAGO_ACCESS_TOKEN`
-   - `ASAAS_API_KEY`
-3. `pnpm db:push` no Neon
-4. `pnpm db:seed`
-5. Build + deploy
-
----
-
-## ORDEM DE EXECUÇÃO
-
-1. ✅ ACTION_PLAN.md criado
-2. ⬜ Corrigir erros de sintaxe (tsconfig)
-3. ⬜ Criar rotas faltantes (2FA, notificações, financial, fiscal, reports, search)
-4. ⬜ Criar frontend ERP (PDV, produtos, clientes, financeiro, configurações)
-5. ⬜ Criar módulo contabilidade
-6. ⬜ Deploy
-
----
-
-**Status atual:** Fase 0 concluída. Pronto para começar Fase 1.
+**PRÓXIMO PASSO IMEDIATO:** Configure as variáveis na Vercel e rode o seed. Sem isso, NADA funciona.

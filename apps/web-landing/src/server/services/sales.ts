@@ -118,8 +118,12 @@ export class ExpiredBatchError extends DomainError {
  *
  * Para produto com controle por lote, consome o lote de menor validade — é o
  * que reduz perda. Para produto sem lote, decremento direto.
+ *
+ * Exportada porque o webhook do iFood (Cap. 11.1) baixa o estoque de um pedido
+ * de delivery sem passar pelo PDV — a mesma regra precisa valer nos dois
+ * caminhos, senão um pedido do marketplace estouraria o estoque fisicamente.
  */
-async function deductStock(
+export async function deductStock(
   tx: Tx,
   tenantId: string,
   productId: string,
@@ -266,6 +270,29 @@ export async function createSale(
     return sum + unitPrice * item.quantity;
   }, 0);
 
+  // Preço não informado vem do catálogo — nunca fica 0 por omissão. Antes, um
+  // item sem `unitPrice` gerava total errado (e até venda grátis) sem nenhum
+  // erro para o operador.
+  const missingPrice = input.items.filter((item) => item.unitPrice === undefined);
+  const prices = missingPrice.length
+    ? await db.product.findMany({
+        where: { id: { in: missingPrice.map((item) => item.productId) } },
+        select: { id: true, unitPrice: true },
+      })
+    : [];
+  const priceByProduct = new Map(prices.map((p) => [p.id, Number(p.unitPrice)]));
+  for (const item of missingPrice) {
+    const catalogPrice = priceByProduct.get(item.productId);
+    if (catalogPrice === undefined) {
+      throw new DomainError(
+        'PRODUCT_NOT_FOUND',
+        'Um dos produtos da venda não existe mais no catálogo.',
+        404,
+      );
+    }
+    item.unitPrice = catalogPrice;
+  }
+
   const discount = input.discountAmount ?? 0;
   const totalAmount = Math.round((subtotal - discount) * 100) / 100;
   const paid = input.payments.reduce((sum, p) => sum + p.amount, 0);
@@ -320,8 +347,11 @@ export async function createSale(
       await deductStock(tx, tenantId, item.productId, item.quantity);
     }
 
-    input.payments.forEach((payment, index) => {
-      void tx.payment.create({
+    // O awaited aqui é obrigatório: PrismaPromise é preguiçosa, e um `void`
+    // dentro da transação descarta a query — os pagamentos NUNCA eram gravados
+    // (o caixa fechava com venda sem forma de pagamento registrada).
+    for (const [index, payment] of input.payments.entries()) {
+      await tx.payment.create({
         data: {
           tenantId,
           saleId: sale.id,
@@ -332,7 +362,7 @@ export async function createSale(
           idempotencyKey: `${input.idempotencyKey}:pay:${index}`,
         },
       });
-    });
+    }
 
     if (hasStoreCredit && input.clientId) {
       await tx.client.update({

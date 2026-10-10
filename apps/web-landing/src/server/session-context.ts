@@ -25,6 +25,8 @@ export interface SessionContext {
     status: string;
     nicheCode: string | null;
     taxRegime: string;
+    simplesNacionalAnexo: string | null;
+    inscricaoEstadual: string | null;
     uf: string | null;
   };
   niche: { code: string; label: string; tagline: string } | null;
@@ -63,6 +65,8 @@ export async function getSessionContext(): Promise<SessionContext | null> {
         status: true,
         nicheCode: true,
         taxRegime: true,
+        simplesNacionalAnexo: true,
+        inscricaoEstadual: true,
         uf: true,
       },
     }),
@@ -96,6 +100,8 @@ export async function getSessionContext(): Promise<SessionContext | null> {
       status: tenant.status,
       nicheCode: tenant.nicheCode,
       taxRegime: tenant.taxRegime,
+      simplesNacionalAnexo: tenant.simplesNacionalAnexo,
+      inscricaoEstadual: tenant.inscricaoEstadual,
       uf: tenant.uf,
     },
     niche,

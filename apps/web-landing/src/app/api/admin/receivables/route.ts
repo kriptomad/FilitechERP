@@ -1,16 +1,64 @@
-import { NextRequest, NextResponse } from 'next/server';
+// src/app/api/admin/receivables/route.ts — Cap. 4.6 / 17.3
+//
+// Antes devolvia DEMO_RECEIVABLES com datas fixas de 2024 e o POST fabricava
+// um registro inexistente — o painel mostrava cobranças que ninguém devia.
+import { prismaUnscoped } from '@/server/db';
+import { requireSession } from '@/server/session';
+import { gatekeeper } from '@/server/gatekeeper';
+import { readJson, requireString, requireNumber, optionalString } from '@/server/request';
+import { writeAuditLog, requestFingerprint } from '@/server/audit';
+import { createReceivable, listReceivables } from '@/server/services/admin-receivables';
+import { handle } from '@/server/handler';
 
-const DEMO_RECEIVABLES = [
-  { id: '1', clientId: '1', clientName: 'Mercado Central', description: 'Venda de mercadorias', amount: 1200.00, dueDate: '2024-12-15T00:00:00Z', status: 'PENDING', isOverdue: false, paidAt: null, createdAt: '2024-11-15T10:00:00Z' },
-  { id: '2', clientId: '2', clientName: 'João da Silva', description: 'Serviço de manutenção', amount: 300.00, dueDate: '2024-11-10T00:00:00Z', status: 'OVERDUE', isOverdue: true, paidAt: null, createdAt: '2024-10-10T14:30:00Z' },
-];
+export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  return NextResponse.json({ success: true, data: DEMO_RECEIVABLES });
+export const GET = handle(async (request: Request) => {
+  const session = await requireSession(request);
+  await gatekeeper(session, { moduleCode: 'financeiro' });
+
+  const url = new URL(request.url);
+  const status = url.searchParams.get('status') ?? undefined;
+  const clientId = url.searchParams.get('clientId') ?? undefined;
+
+  const receivables = await listReceivables(prismaUnscoped, session.tenantId, {
+    status,
+    clientId,
+  });
+
+  return { success: true, data: receivables, error: null };
+});
+
+interface CreateBody {
+  clientId?: unknown;
+  description?: unknown;
+  amount?: unknown;
+  dueDate?: unknown;
+  saleId?: unknown;
 }
 
-export async function POST(request: Request) {
-  const body = await request.json();
-  const newReceivable = { id: String(Date.now()), ...body, status: 'PENDING', isOverdue: false, paidAt: null, createdAt: new Date().toISOString() };
-  return NextResponse.json({ success: true, data: newReceivable }, { status: 201 });
-}
+export const POST = handle(async (request: Request) => {
+  const session = await requireSession(request);
+  await gatekeeper(session, { moduleCode: 'financeiro', requiredPermission: 'crm:write' });
+
+  const body = await readJson<CreateBody>(request);
+
+  const created = await createReceivable(prismaUnscoped, session.tenantId, {
+    clientId: requireString(body.clientId, 'cliente', { max: 64 }),
+    description: requireString(body.description, 'descrição', { min: 2, max: 200 }),
+    amount: requireNumber(body.amount, 'valor'),
+    dueDate: String(body.dueDate ?? ''),
+    saleId: optionalString(body.saleId, 'saleId', 64),
+  });
+
+  await writeAuditLog({
+    tenantId: session.tenantId,
+    userId: session.userId,
+    action: 'RECEIVABLE_CREATED',
+    entityType: 'AccountReceivable',
+    entityId: created.id,
+    after: { amount: created.amount, dueDate: created.dueDate },
+    ...requestFingerprint(request),
+  });
+
+  return Response.json({ success: true, data: created, error: null }, { status: 201 });
+});

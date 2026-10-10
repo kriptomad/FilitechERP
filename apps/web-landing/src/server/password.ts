@@ -3,6 +3,7 @@
 // next.config.js declara `serverExternalPackages: ['argon2']` para o Next não
 // tentar bundlará-lo (quebraria o build da function).
 import argon2 from 'argon2';
+import { randomBytes } from 'node:crypto';
 
 const ARGON2_OPTIONS: argon2.Options = {
   type: argon2.argon2id,
@@ -27,7 +28,18 @@ export async function verifyPassword(
   }
 }
 
-/** Senha provisória de convite (Cap. 14) — forte o bastante, semvusuário final. */
+/**
+ * Senha provisória de convite (Cap. 14) — forte e gerada com entropia de
+ * CSPRNG. A versão anterior usava `Math.random()`, que é previsível: quem
+ * observasse algumas saídas poderia reconstruir o padrão e prever a senha
+ * provisória de outro convite.
+ */
 export function generateTemporaryPassword(): string {
-  return `Filia${Math.random().toString(36).slice(2, 10).toUpperCase()}!`;
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const bytes = randomBytes(16);
+  let out = '';
+  for (const byte of bytes) {
+    out += alphabet[byte % alphabet.length];
+  }
+  return `Fil!${out}`;
 }

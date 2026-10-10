@@ -39,6 +39,45 @@ export interface SessionClaims {
   sessionId: string;
 }
 
+/**
+ * Desafio de 2FA (Cap. 14.2) — token de 5 minutos que prova "a senha já foi
+ * validada" SEM ser uma sessão.
+ *
+ * Por que não emitir a sessão direto e verificar depois: uma sessão emitida
+ * antes do segundo fator é uma sessão completa — qualquer endpoint a aceitaria.
+ * O desafio carrega `purpose: '2fa'` e o `verifySessionToken` normal o recusa.
+ */
+export interface ChallengeClaims {
+  userId: string;
+  purpose: '2fa';
+}
+
+const CHALLENGE_TTL_SECONDS = 5 * 60;
+
+export async function signChallengeToken(userId: string): Promise<string> {
+  return new SignJWT({ userId, purpose: '2fa' })
+    .setProtectedHeader({ alg: ALGORITHM })
+    .setIssuer(ISSUER)
+    .setIssuedAt()
+    .setExpirationTime(`${CHALLENGE_TTL_SECONDS}s`)
+    .sign(privateKey());
+}
+
+/** Valida o desafio. Lança se expirado, adulterado ou não for um desafio. */
+export async function verifyChallengeToken(token: string): Promise<string> {
+  const { payload } = await jwtVerify(token, publicKey(), {
+    algorithms: [ALGORITHM],
+    issuer: ISSUER,
+  });
+  if (payload.purpose !== '2fa') {
+    throw new Error('Token não é um desafio de 2FA.');
+  }
+  if (typeof payload.userId !== 'string') {
+    throw new Error('Desafio de 2FA sem userId.');
+  }
+  return payload.userId;
+}
+
 export async function signSessionToken(
   claims: SessionClaims,
   expiresInSeconds = 60 * 60 * 8,
@@ -60,6 +99,12 @@ export async function verifySessionToken(token: string): Promise<SessionClaims> 
 }
 
 function toClaims(payload: JWTPayload): SessionClaims {
+  // Um token de desafio 2FA NUNCA vale como sessão: ele só tem userId e
+  // purpose, então as claims obrigatórias falhariam de qualquer forma — mas a
+  // checagem explícita torna a intenção impossível de burlar por acidente.
+  if (payload.purpose === '2fa') {
+    throw new Error('Token de desafio 2FA não é uma sessão válida.');
+  }
   const { userId, tenantId, role, sessionId } = payload as Record<string, unknown>;
   if (typeof userId !== 'string' || typeof tenantId !== 'string') {
     throw new Error('Token sem claims obrigatórias.');

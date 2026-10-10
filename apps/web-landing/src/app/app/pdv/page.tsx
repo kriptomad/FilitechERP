@@ -49,7 +49,7 @@ export default function PdvPage() {
       try {
         const [productList, openReg] = await Promise.all([
           api<Product[]>('/api/products'),
-          api<OpenRegister | null>('/api/cash-register'),
+          api<OpenRegister | null>('/api/cash-register?open=1'),
         ]);
         if (cancelled) return;
         setProducts(productList);

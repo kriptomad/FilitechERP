@@ -10,6 +10,7 @@ import { NextResponse } from 'next/server';
 import { prismaUnscoped } from '@/server/db';
 import { jsonError } from '@/server/api-envelope';
 import { attachSessionCookie, createSession } from '@/server/session';
+import { signChallengeToken } from '@/server/jwt';
 import { verifyPassword } from '@/server/password';
 import { handle } from '@/server/handler';
 import { readJson, requireEmail, requireString } from '@/server/request';
@@ -59,6 +60,23 @@ export const POST = handle(async (request: Request) => {
       'TENANT_SUSPENDED',
       'Assinatura suspensa por inadimplência. Regularize o pagamento para continuar.',
     );
+  }
+
+  // ── 2FA (Cap. 14.2) ──────────────────────────────────────────────────────
+  // A senha sozinha NÃO abre sessão quando o segundo fator está ativo. Emitimos
+  // um desafio de 5 minutos: só /api/auth/2fa/verify troca o desafio pela
+  // sessão real. Sem isto, ativar 2FA seria ativar nada.
+  if (found.totpConfirmedAt) {
+    const challenge = await signChallengeToken(found.id);
+    return NextResponse.json({
+      success: true,
+      data: {
+        requiresTwoFactor: true,
+        twoFactorToken: challenge,
+        message: 'Informe o código do aplicativo autenticador.',
+      },
+      error: null,
+    });
   }
 
   const { accessToken } = await createSession({

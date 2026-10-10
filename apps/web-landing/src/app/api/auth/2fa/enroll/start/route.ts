@@ -4,6 +4,7 @@ import { prismaUnscoped } from '@/server/db';
 import { readSession } from '@/server/session';
 import { handle } from '@/server/handler';
 import { DomainError } from '@/server/api-envelope';
+import { sealTotpSecret } from '@/server/totp-secret';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,10 +22,11 @@ export const POST = handle(async (request: Request) => {
   const secret = authenticator.generateSecret();
   const otpauthUrl = authenticator.keyuri(user.email, 'Filitech ERP', secret);
 
-  // Salva o segredo temporariamente (não confirmado ainda)
+  // Grava cifrado (AES-256-GCM). A versão anterior guardava apenas base64 —
+  // o dump do banco bastava para reconstituir o segundo fator.
   await prismaUnscoped.user.update({
     where: { id: user.id },
-    data: { totpSecretEncrypted: Buffer.from(secret).toString('base64') },
+    data: { totpSecretEncrypted: sealTotpSecret(secret) },
   });
 
   return { otpauthUrl, secret };

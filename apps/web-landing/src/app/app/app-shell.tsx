@@ -17,7 +17,10 @@ const NAV: NavItem[] = [
   { href: '/app/produtos', label: 'Produtos', moduleCode: 'estoque' },
   { href: '/app/caixa', label: 'Caixa', moduleCode: 'pdv' },
   { href: '/app/ordens-servico', label: 'Ordens de serviço', moduleCode: 'work-order' },
-  { href: '/app/clientes', label: 'Clientes', moduleCode: 'pdv' },
+  // Clientes é `crm`, não `pdv`: a API /api/admin/clients é gatekeepada pelo
+  // módulo crm (só no PRO). Usar `pdv` aqui mostrava um item que respondia
+  // 402 com upsell ao ser clicado.
+  { href: '/app/clientes', label: 'Clientes', moduleCode: 'crm' },
   { href: '/app/financeiro', label: 'Financeiro', moduleCode: 'financeiro' },
   { href: '/app/configuracoes', label: 'Configurações', moduleCode: '' },
 ];
