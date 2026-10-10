@@ -7,24 +7,8 @@
 
   "crons": [
     {
-      "path": "/api/cron/dunning",
+      "path": "/api/cron/daily",
       "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/expire-charges",
-      "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/accounting-tasks",
-      "schedule": "30 3 * * *"
-    },
-    {
-      "path": "/api/cron/loyalty-expire",
-      "schedule": "0 4 * * *"
-    },
-    {
-      "path": "/api/cron/pluggy-sync",
-      "schedule": "0 */6 * * *"
     }
   ],
 
