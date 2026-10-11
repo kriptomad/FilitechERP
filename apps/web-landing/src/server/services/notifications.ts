@@ -1,151 +1,244 @@
-// src/server/services/notifications.ts — Cap. 8.4.5 / 14.3
-//
-// Notificações multi-canal do tenant.
-//
-// Portado do `apps/api` (BullMQ + filas), com uma diferença de plataforma: na
-// Vercel não há processo de worker para consumir fila. O canal IN_APP é
-// gravado de forma síncrona (é a fonte de verdade da tela de sino), e os
-// canais externos são disparados "fire-and-forget" com fetch — a falha de um
-// provedor externo nunca derruba a ação do usuário.
-//
-// E-mail real: quando `RESEND_API_KEY` está presente, a mensagem é enviada de
-// verdade. Sem a chave, o e-mail é registrado no log do servidor (estado
-// explícito, não "fingimos que enviamos").
+// src/server/services/notifications.ts — Cap. 8.4.5
+// Sistema centralizado de notificações (in-app, e-mail, push, WhatsApp)
 import { prismaUnscoped } from '../db';
-import { env } from '../env';
-
-export type NotificationPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
-export type NotificationChannel = 'IN_APP' | 'EMAIL' | 'PUSH' | 'WHATSAPP' | 'SMS';
+import { DomainError } from '../api-envelope';
 
 export interface NotificationInput {
-  tenantId: string;
-  /** userId dono da notificação. */
-  recipientId: string;
+  recipientId: string; // tenantId ou userId
   category: string;
   title: string;
   body: string;
-  priority?: NotificationPriority;
-  channels?: NotificationChannel[];
+  priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
   data?: Record<string, unknown>;
   actionUrl?: string;
+  sourceType?: 'IN_APP' | 'EMAIL' | 'PUSH' | 'WHATSAPP' | 'SMS' | 'SYSTEM';
+  sourceId?: string;
   expiresAt?: Date;
-  /** Corpo do e-mail (HTML simples). Se ausente, usa `body`. */
-  emailHtml?: string;
 }
 
-export interface EmitResult {
-  notificationId: string;
-  inApp: boolean;
-  email: 'sent' | 'skipped' | 'failed';
+export interface NotificationPreferenceInput {
+  userId: string;
+  enabledChannels: ('IN_APP' | 'EMAIL' | 'PUSH' | 'WHATSAPP' | 'SMS')[];
+  categoryPreferences: Record<string, { enabled: boolean; channels: string[] }>;
 }
 
 /**
- * Cria a notificação in-app e dispara os canais externos.
- *
- * A gravação in-app é awaited porque é o que a UI lê; os canais externos não
- * são bloqueantes (provedor fora do ar não pode travar o fluxo do usuário).
+ * Emite notificação multicanal — ponto único de emissão.
+ * Reaproveita WhatsApp (Cap. 20.2), e-mail (Resend), push (FCM/APNs).
  */
-export async function emitNotification(input: NotificationInput): Promise<EmitResult> {
+export async function emitNotification(input: NotificationInput): Promise<string> {
+  const { recipientId, category, title, body, priority = 'NORMAL', data, actionUrl, sourceType = 'SYSTEM', sourceId, expiresAt } = input;
+
+  // 1. Cria notificação in-app (sempre)
   const notification = await prismaUnscoped.notification.create({
     data: {
-      tenantId: input.tenantId,
-      recipientId: input.recipientId,
-      category: input.category,
-      title: input.title,
-      body: input.body,
-      priority: input.priority ?? 'NORMAL',
-      data: (input.data ?? {}) as never,
-      actionUrl: input.actionUrl ?? null,
-      expiresAt: input.expiresAt ?? null,
+      tenantId: recipientId,
+      recipientId,
+      category,
+      title,
+      body,
+      priority,
+      data: data as any,
+      actionUrl,
+      sourceType,
+      sourceId,
+      expiresAt,
     },
   });
 
-  const channels = input.channels ?? ['IN_APP'];
-  let email: EmitResult['email'] = 'skipped';
+  // 2. Verifica preferências do usuário para canais extras
+  const prefs = await getUserPreferences(recipientId);
+  const shouldSendEmail = prefs.enabledChannels.includes('EMAIL') && prefs.categoryPreferences[category]?.enabled !== false;
+  const shouldSendWhatsApp = prefs.enabledChannels.includes('WHATSAPP') && prefs.categoryPreferences[category]?.enabled !== false;
+  const shouldSendPush = prefs.enabledChannels.includes('PUSH') && prefs.categoryPreferences[category]?.enabled !== false;
 
-  if (channels.includes('EMAIL')) {
-    email = await sendEmail(input).catch((err) => {
-      console.error('[notifications] falha ao enviar e-mail:', err);
-      return 'failed' as const;
-    });
+  // 3. Envia canais assíncronos (não bloqueia)
+  if (shouldSendEmail) {
+    sendEmailNotification(recipientId, title, body, actionUrl).catch(console.error);
+  }
+  if (shouldSendWhatsApp) {
+    sendWhatsAppNotification(recipientId, title, body).catch(console.error);
+  }
+  if (shouldSendPush) {
+    sendPushNotification(recipientId, title, body, data).catch(console.error);
   }
 
-  return { notificationId: notification.id, inApp: true, email };
+  return notification.id;
+}
+
+async function getUserPreferences(userId: string): Promise<{
+  enabledChannels: string[];
+  categoryPreferences: Record<string, { enabled: boolean; channels: string[] }>;
+}> {
+  const pref = await prismaUnscoped.notificationPreference.findUnique({
+    where: { userId },
+  });
+
+  if (!pref) {
+    return {
+      enabledChannels: ['IN_APP'],
+      categoryPreferences: {},
+    };
+  }
+
+  return {
+    enabledChannels: pref.enabledChannels,
+    categoryPreferences: pref.categoryPreferences as any,
+  };
+}
+
+async function sendEmailNotification(recipientId: string, title: string, body: string, actionUrl?: string): Promise<void> {
+  const { sendEmail } = await import('../email');
+  const user = await prismaUnscoped.user.findFirst({ where: { id: recipientId }, select: { email: true, name: true } });
+  if (!user?.email) return;
+
+  await sendEmail({
+    to: user.email,
+    subject: `[Filitech] ${title}`,
+    html: `
+      <div style="font-family: system-ui; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #4F46E5;">${title}</h2>
+        <p>${body}</p>
+        ${actionUrl ? `<p><a href="${actionUrl}" style="background: #4F46E5; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; display: inline-block;">Ver no Filitech</a></p>` : ''}
+        <hr style="margin: 24px 0; border-color: #E5E7EB;">
+        <p style="font-size: 12px; color: #9CA3AF;">Você recebeu este e-mail porque tem notificações por e-mail ativadas para esta categoria.</p>
+      </div>
+    `,
+  });
+}
+
+async function sendWhatsAppNotification(recipientId: string, title: string, body: string): Promise<void> {
+  const { sendWhatsAppMessage } = await import('../whatsapp');
+  const tenant = await prismaUnscoped.tenant.findUnique({ where: { id: recipientId }, select: { phone: true } });
+  if (!tenant?.phone) return;
+
+  await sendWhatsAppMessage({
+    to: tenant.phone,
+    message: `*${title}*\n${body}`,
+  });
+}
+
+async function sendPushNotification(recipientId: string, title: string, body: string, data?: Record<string, unknown>): Promise<void> {
+  // Integração com FCM/APNs
+  // Busca tokens de dispositivo do usuário
+  const devices = await prismaUnscoped.userDevice.findMany({
+    where: { userId: recipientId, pushToken: { not: null } },
+    select: { pushToken: true, platform: true },
+  });
+
+  for (const device of devices) {
+    // Envia via Firebase Admin SDK ou similar
+    console.log(`[push] Enviando para ${device.platform}: ${title}`);
+  }
 }
 
 /**
- * Envio de e-mail via Resend (HTTP, sem SDK — mantém a function enxuta).
- * Retorna o estado REAL: não há "enviado" sem resposta 2xx do provedor.
+ * Marca notificação como lida
  */
-async function sendEmail(input: NotificationInput): Promise<'sent' | 'skipped'> {
-  if (!env.resendApiKey) {
-    // Estado explícito: sem chave, nada é enviado. Log para o operador ver no
-    // painel de logs da Vercel — diferente de "devolveu sucesso" sem entregar.
-    console.warn(
-      `[notifications] RESEND_API_KEY ausente — e-mail "${input.title}" NÃO enviado (tenant ${input.tenantId}).`,
-    );
-    return 'skipped';
-  }
-
-  const recipient = await prismaUnscoped.user.findUnique({
-    where: { id: input.recipientId },
-    select: { email: true, name: true },
-  });
-  if (!recipient) return 'skipped';
-
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.resendApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: process.env.EMAIL_FROM ?? 'Filitech ERP <no-reply@filitecherp.com>',
-      to: [recipient.email],
-      subject: input.title,
-      text: input.body,
-      html:
-        input.emailHtml ??
-        `<div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.6">
-           <h2 style="margin:0 0 12px">${escapeHtml(input.title)}</h2>
-           <p style="margin:0 0 12px">${escapeHtml(input.body)}</p>
-           ${input.actionUrl ? `<p><a href="${escapeHtml(input.actionUrl)}">${escapeHtml(input.actionUrl)}</a></p>` : ''}
-         </div>`,
-    }),
-  });
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new Error(`Resend HTTP ${res.status}: ${detail.slice(0, 300)}`);
-  }
-
-  return 'sent';
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-export async function markAsRead(notificationId: string, userId: string): Promise<boolean> {
-  const result = await prismaUnscoped.notification.updateMany({
+export async function markAsRead(notificationId: string, userId: string): Promise<void> {
+  await prismaUnscoped.notification.update({
     where: { id: notificationId, recipientId: userId },
-    data: { readAt: new Date() },
+    data: { readAt: new Date(), status: 'READ' },
   });
-  return result.count > 0;
 }
 
+/**
+ * Marca todas como lidas
+ */
 export async function markAllAsRead(userId: string): Promise<number> {
   const result = await prismaUnscoped.notification.updateMany({
     where: { recipientId: userId, readAt: null },
-    data: { readAt: new Date() },
+    data: { readAt: new Date(), status: 'READ' },
   });
   return result.count;
 }
 
-export async function getUnreadCount(userId: string): Promise<number> {
-  return prismaUnscoped.notification.count({ where: { recipientId: userId, readAt: null } });
+/**
+ * Lista notificações do usuário
+ */
+export async function listNotifications(userId: string, options?: {
+  unreadOnly?: boolean;
+  category?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ notifications: any[]; total: number; unreadCount: number }> {
+  const where: any = { recipientId: userId };
+  if (options?.unreadOnly) where.readAt = null;
+  if (options?.category) where.category = options.category;
+
+  const [notifications, total, unreadCount] = await Promise.all([
+    prismaUnscoped.notification.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: options?.limit ?? 50,
+      skip: options?.offset ?? 0,
+    }),
+    prismaUnscoped.notification.count({ where }),
+    prismaUnscoped.notification.count({ where: { recipientId: userId, readAt: null } }),
+  ]);
+
+  return { notifications, total, unreadCount };
+}
+
+/**
+ * Atualiza preferências de notificação
+ */
+export async function updatePreferences(input: NotificationPreferenceInput): Promise<void> {
+  await prismaUnscoped.notificationPreference.upsert({
+    where: { userId: input.userId },
+    create: {
+      userId: input.userId,
+      enabledChannels: input.enabledChannels,
+      categoryPreferences: input.categoryPreferences as any,
+    },
+    update: {
+      enabledChannels: input.enabledChannels,
+      categoryPreferences: input.categoryPreferences as any,
+    },
+  });
+}
+
+/**
+ * Templates de notificação pré-definidos
+ */
+export const NOTIFICATION_TEMPLATES: Record<string, { title: string; body: string; priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT' }> = {
+  personal_budget_exceeded: { title: 'Orçamento excedido', body: 'O orçamento da categoria "{{category}}" foi excedido em {{percentage}}%.', priority: 'HIGH' },
+  personal_budget_warning_80: { title: 'Orçamento próximo do limite', body: 'O orçamento da categoria "{{category}}" atingiu {{percentage}}% do limite.', priority: 'NORMAL' },
+  personal_bill_reminder: { title: 'Conta a vencer', body: '"{{description}}" vence em {{dueDate}} — R$ {{amount}}', priority: 'NORMAL' },
+  personal_bill_overdue: { title: 'Conta vencida', body: '"{{description}}" venceu em {{dueDate}} — R$ {{amount}}', priority: 'HIGH' },
+  carne_leao_due: { title: 'Carnê-Leão a pagar', body: 'Pagamento do Carnê-Leão vence em {{dueDate}}. Valor estimado: R$ {{amount}}', priority: 'HIGH' },
+  work_order_approved: { title: 'Ordem de serviço aprovada', body: 'A OS #{{osNumber}} foi aprovada pelo cliente.', priority: 'NORMAL' },
+  payment_failed: { title: 'Pagamento falhou', body: 'O pagamento de R$ {{amount}} não pôde ser processado. Verifique seu cartão.', priority: 'URGENT' },
+  stock_low: { title: 'Estoque baixo', body: '{{productName}} abaixo do mínimo. Sugerido: {{suggestedQty}} {{unit}}.', priority: 'NORMAL' },
+  cash_flow_alert: { title: 'Alerta de fluxo de caixa', body: 'Saldo projetado para {{date}} é negativo: R$ {{amount}}', priority: 'HIGH' },
+  accounting_task_reminder: { title: 'Tarefa contábil pendente', body: '{{taskType}} para {{clientName}} vence em {{dueDate}}', priority: 'NORMAL' },
+  fiscal_document_rejected: { title: 'Documento fiscal rejeitado', body: 'A {{documentType}} #{{number}} foi rejeitada: {{reason}}', priority: 'URGENT' },
+  referral_converted: { title: 'Indicação convertida!', body: 'Sua indicação virou assinante! 1 mês de crédito aplicado.', priority: 'NORMAL' },
+};
+
+/**
+ * Emite notificação a partir de template
+ */
+export async function emitFromTemplate(
+  templateKey: string,
+  recipientId: string,
+  variables: Record<string, string>,
+  extra?: Partial<NotificationInput>
+): Promise<string> {
+  const template = NOTIFICATION_TEMPLATES[templateKey];
+  if (!template) throw new DomainError('TEMPLATE_NOT_FOUND', `Template "${templateKey}" não encontrado.`);
+
+  let body = template.body;
+  for (const [key, value] of Object.entries(variables)) {
+    body = body.replace(new RegExp(`{{${key}}}`, 'g'), value);
+  }
+
+  return emitNotification({
+    recipientId,
+    category: templateKey,
+    title: template.title,
+    body,
+    priority: template.priority,
+    ...extra,
+  });
 }

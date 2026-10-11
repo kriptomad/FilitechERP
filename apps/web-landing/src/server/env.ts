@@ -70,6 +70,9 @@ export const env = {
   get cronSecret(): string {
     return optional('CRON_SECRET');
   },
+  get backupEncryptionKey(): string {
+    return optional('BACKUP_ENCRYPTION_KEY');
+  },
 };
 
 /** URL absoluto do site, usado em redirects e links de e-mail. */

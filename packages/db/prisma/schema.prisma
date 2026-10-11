@@ -222,6 +222,12 @@ model Tenant {
   personalTransactions PersonalTransaction[]
   bankAccounts         BankAccount[]
   personalAccounts     PersonalAccount[] @relation("PersonalAccountTenant")
+  supportTickets        SupportTicket[]
+  apiKeys               TenantApiKey[]
+  webhookEndpoints      TenantWebhookEndpoint[]
+  companyPartners       CompanyPartner[]
+  partnerPayouts        PartnerPayout[]
+  backupRecords         BackupRecord[]
   @@index([status])
   @@index([parentTenantId])
   @@map("tenants")
@@ -401,6 +407,7 @@ model User {
   personalTransactionSplits PersonalTransactionSplit[]
   personalTransactionsCreated PersonalTransaction[]
   personalAccountsOwned     PersonalAccount[] @relation("PersonalAccountOwner")
+  supportTickets          SupportTicket[]
   @@unique([tenantId, email])
   @@index([tenantId, role])
   @@map("users")
@@ -524,6 +531,9 @@ model Product {
   unitConversionFactor  Decimal?            @db.Decimal(12, 4)
   isKitComposition      Boolean             @default(false)
   active                Boolean             @default(true)
+  reorderTargetQuantity Decimal?            @db.Decimal(12, 3) // quantidade alvo para reposição
+  unit                  String              // unidade de medida (ex.: 'un', 'cx', 'kg', 'l') @default("un")
+  averageCost           Decimal             @db.Decimal(12, 2) // custo médio por unidade (used in reorder suggestions)
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
 
@@ -1471,7 +1481,12 @@ enum NotificationPriority {
 model Notification {
   id           String               @id @default(uuid())
   tenantId     String
-  recipientId  String               // userId ou tenantId
+// userId OU tenantId (notificacao de transmissao para o tenant inteiro).
+// Tem de ser NULLABLE por dois motivos, nao por estetica:
+//  1. a relacao e SetNull (exclusao de usuario) - se fosse NOT NULL,
+//     o SET NULL abortaria em runtime (o proprio prisma validate avisa);
+//  2. notificacao de tenant (broadcast / admin) nao tem usuario destinatario.
+  recipientId  String?
   category     String
   title        String
   body         String
@@ -1537,6 +1552,7 @@ model TwoFactorBackupCode {
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  admin     PlatformAdminUser? @relation(fields: [userId], references: [id], onDelete: Cascade, map: "admin_backup_codes")
 
   @@index([userId, usedAt])
   @@map("two_factor_backup_codes")
@@ -2610,6 +2626,7 @@ model PersonalTransaction {
   amount                 Decimal                 @db.Decimal(14, 2) // sempre positivo; o "type" define o sinal no cálculo de saldo, nunca um valor negativo armazenado
   transactionDate        DateTime
   isPrivate              Boolean                 @default(false) // Cap. 22.3 — visível apenas para createdByUserId dentro da residência
+  isRecurring            Boolean                 @default(false) // Gerado a partir de regra de recorrência (Cap. 22.6)
   attachmentStorageKey   String?                 // foto do recibo, R2 (Cap. 20.5)
   openFinanceExternalId  String?                 @unique // idempotência: evita duplicar a mesma transação em cada sincronização do Open Finance (Cap. 22.5)
   createdAt              DateTime                @default(now())
@@ -2651,10 +2668,12 @@ model PersonalRecurrenceRule {
   tenantId             String
   frequency            PersonalRecurrenceFrequency
   dayOfMonth           Int?                        // obrigatório quando frequency = MONTHLY/YEARLY
+  interval             Int                       // intervalos: WEEKLY=1, MONTHLY=1, YEARLY=1; custom values for skip-patterns
   templateDescription  String
   templateAmount       Decimal                     @db.Decimal(14, 2)
   templateAccountId    String
   templateCategoryId   String?
+  templateType         PersonalTransactionType     @default(EXPENSE)
   nextOccurrenceAt     DateTime
   endDate              DateTime?
   active               Boolean                     @default(true)
@@ -2700,6 +2719,7 @@ model PersonalBudget {
   monthReference DateTime         // sempre normalizado para o dia 01 do mês de referência
   limitAmount    Decimal          @db.Decimal(14, 2)
   rolloverEnabled Boolean         @default(false) // se true, saldo não gasto do mês anterior soma ao limite do mês seguinte
+  alertThreshold  Int             @default(80) // porcentagem (80% = alerta de aviso, 100% = alerta de estouro)
 
   tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   category       PersonalCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
@@ -2877,4 +2897,378 @@ model NetWorthSnapshot {
 
   @@unique([tenantId, snapshotDate])
   @@map("net_worth_snapshots")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PLATFORM ADMIN — Cap. 13
+// ─────────────────────────────────────────────────────────────────────────
+
+enum PlatformAdminRole {
+  SUPER_ADMIN
+  FINANCE_ANALYST
+  SUPPORT_AGENT
+  DEVOPS
+}
+
+model PlatformAdminUser {
+  id                String             @id @default(uuid())
+  email             String             @unique
+  name              String
+  passwordHash      String
+  role              PlatformAdminRole  @default(SUPPORT_AGENT)
+  active            Boolean            @default(true)
+  totpSecretEncrypted String?
+  totpConfirmedAt   DateTime?
+  backupCodes       TwoFactorBackupCode[]
+  activeSessions    PlatformAdminSession[]
+  auditLogs         PlatformAdminAuditLog[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@map("platform_admin_users")
+}
+
+model PlatformAdminSession {
+  id            String   @id @default(uuid())
+  userId        String
+  sessionId     String   @unique
+  ipAddress     String?
+  userAgent     String?
+  lastActivity  DateTime @default(now())
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  user          PlatformAdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("platform_admin_sessions")
+}
+
+model PlatformAdminAuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  action      String
+  entityType  String
+  entityId    String?
+  before      Json?
+  after       Json?
+  ipAddress   String?
+  userAgent   String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  user        PlatformAdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@map("platform_admin_audit_logs")
+}
+
+model AdminIpAllowlistEntry {
+  id          String   @id @default(uuid())
+  cidr        String   @unique
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("admin_ip_allowlist")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// BILLING EXTRAS — Cap. 2.7 / 2.8
+// ─────────────────────────────────────────────────────────────────────────
+
+model DiscountCoupon {
+  id              String   @id @default(uuid())
+  code            String   @unique
+  description     String?
+  discountPercent Decimal  @db.Decimal(5, 2)
+  maxUses         Int?
+  usedCount       Int      @default(0)
+  validFrom       DateTime
+  validUntil      DateTime
+  applicablePlans String[] // códigos dos planos; vazio = todos
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("discount_coupons")
+}
+
+model ReleaseNote {
+  id          String   @id @default(uuid())
+  version     String
+  title       String
+  body        String   @db.Text
+  isPublic    Boolean  @default(false)
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@map("release_notes")
+}
+
+model IncidentEvent {
+  id          String   @id @default(uuid())
+  component   String   // "API" | "WEBHOOKS" | "DATABASE" | "PDV" | "BILLING" | "EMAIL" | "WHATSAPP" | "FISCAL"
+  severity    String   // "OUTAGE" | "DEGRADED" | "MAINTENANCE"
+  title       String
+  description String   @db.Text
+  startedAt   DateTime
+  resolvedAt  DateTime?
+  isPublic    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([component, startedAt])
+  @@map("incident_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// HELPDESK INTERNO — Cap. 15.3
+// ─────────────────────────────────────────────────────────────────────────
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  WAITING_THIRD_PARTY
+  RESOLVED
+  CLOSED
+}
+
+enum SupportTicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum SupportTicketCategory {
+  BILLING
+  TECHNICAL
+  FISCAL
+  ACCOUNT
+  FEATURE_REQUEST
+  OTHER
+}
+
+model SupportTicket {
+  id              String                 @id @default(uuid())
+  tenantId        String
+  userId          String
+  category        SupportTicketCategory
+  priority        SupportTicketPriority  @default(NORMAL)
+  status          SupportTicketStatus    @default(OPEN)
+  subject         String
+  slaDeadlineAt   DateTime?
+  assignedAgentId String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  resolvedAt      DateTime?
+  closedAt        DateTime?
+
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages        SupportTicketMessage[]
+
+  @@index([tenantId, status, priority])
+  @@index([assignedAgentId, status])
+  @@map("support_tickets")
+}
+
+model SupportTicketMessage {
+  id          String   @id @default(uuid())
+  ticketId    String
+  authorId    String
+  authorType  String   // "TENANT_USER" | "SUPPORT_AGENT" | "SYSTEM"
+  body        String   @db.Text
+  attachments String[] // R2 keys
+  createdAt   DateTime @default(now())
+
+  ticket      SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@map("support_ticket_messages")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// TENANT API KEYS & WEBHOOKS — Cap. 15.4
+// ─────────────────────────────────────────────────────────────────────────
+
+enum TenantApiKeyScope {
+  READ_PRODUCTS
+  WRITE_PRODUCTS
+  READ_SALES
+  WRITE_SALES
+  READ_CLIENTS
+  WRITE_CLIENTS
+  READ_FINANCIAL
+  WRITE_FINANCIAL
+  READ_FISCAL
+  WRITE_FISCAL
+  READ_INVENTORY
+  WRITE_INVENTORY
+  WEBHOOKS_MANAGE
+  ADMIN_FULL
+}
+
+model TenantApiKey {
+  id          String              @id @default(uuid())
+  tenantId    String
+  name        String
+  keyPrefix   String              // ex.: "fltk_live_"
+  keyHash     String              // SHA-256 da chave completa
+  scopes      TenantApiKeyScope[]
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, revokedAt])
+  @@map("tenant_api_keys")
+}
+
+model TenantWebhookEndpoint {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  url                   String
+  events                String[] // ex.: ["sale.completed", "payment.failed", "nfe.authorized"]
+  signingSecretEncrypted String
+  active                Boolean  @default(true)
+  lastDeliveryAt        DateTime?
+  lastDeliverySuccess   Boolean?
+  lastDeliveryStatus    Int?
+  failureCount          Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  tenant                Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deliveries            WebhookDelivery[]
+
+  @@index([tenantId, active])
+  @@map("tenant_webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id              String   @id @default(uuid())
+  endpointId      String
+  eventType       String
+  payload         Json
+  responseStatus  Int?
+  responseBody    String?
+  attempt         Int      @default(1)
+  deliveredAt     DateTime?
+  nextRetryAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  endpoint        TenantWebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId, createdAt])
+  @@index([nextRetryAt])
+  @@map("webhook_deliveries")
+}
+
+enum PartnerRole {
+  SOCIO_ADMINISTRADOR
+  SOCIO_QUOTISTA
+  INVESTIDOR
+}
+
+model CompanyPartner {
+  id              String      @id @default(uuid())
+  tenantId        String
+  name            String
+  document        String
+  email           String?
+  phone           String?
+  role            PartnerRole
+  equityPercent   Decimal     @db.Decimal(5, 2)
+  proLabore       Decimal?    @db.Decimal(12, 2)
+  profitShare     Decimal?    @db.Decimal(5, 2)
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payouts         PartnerPayout[]
+
+  @@unique([tenantId, document])
+  @@map("company_partners")
+}
+
+model PartnerPayout {
+  id              String   @id @default(uuid())
+  tenantId        String
+  partnerId       String
+  amount          Decimal  @db.Decimal(12, 2)
+  type            String   // "PRO_LABORE" | "PROFIT_DISTRIBUTION" | "REIMBURSEMENT"
+  description     String?
+  paidAt          DateTime
+  createdAt       DateTime @default(now())
+
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  partner         CompanyPartner @relation(fields: [partnerId], references: [id])
+
+  @@index([tenantId, partnerId, createdAt])
+  @@map("partner_payouts")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// BACKUP RECORDS — Cap. 10.3
+// ─────────────────────────────────────────────────────────────────────────
+
+model BackupRecord {
+  id              String   @id @default(uuid())
+  tenantId        String
+  fileName        String
+  r2Key           String
+  sizeBytes       Int
+  encryptionAlgo  String
+  status          String   @default("PENDING") // PENDING | COMPLETED | FAILED
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("backup_records")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// LEGAL DOCUMENT VERSIONS (LGPD) — Cap. 1.2.1
+// ─────────────────────────────────────────────────────────────────────────
+
+enum LegalDocumentType {
+  TERMS_OF_USE
+  PRIVACY_POLICY
+}
+
+model LegalDocumentVersion {
+  id          String             @id @default(uuid())
+  type        LegalDocumentType
+  version     String
+  content     String             @db.Text
+  effectiveAt DateTime
+  createdAt   DateTime           @default(now())
+
+  @@unique([type, version])
+  @@index([type, effectiveAt])
+  @@map("legal_document_versions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ROLE DEFAULT PERMISSIONS — Cap. 14
+// ─────────────────────────────────────────────────────────────────────────
+
+model RoleDefaultPermission {
+  id          String   @id @default(uuid())
+  role        String
+  permission  String
+
+  @@unique([role, permission])
+  @@map("role_default_permissions")
 }

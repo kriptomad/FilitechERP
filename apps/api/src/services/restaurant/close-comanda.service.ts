@@ -132,6 +132,12 @@ async function resolveServiceAsProduct(
       name: service.name,
       unitPrice: service.basePrice,
       trackingType: "NONE",
+      // `unit` e `averageCost` são obrigatórios no schema (usados pela sugestão
+      // de reposição do Cap. 17.8.3, que divide estoque por unidade de venda).
+      // Serviço não tem estoque nem unidade de compra, então recebe os valores
+      // neutros: "un" e custo igual ao preço — serviço não gera CMV de estoque.
+      unit: "un",
+      averageCost: service.basePrice,
     },
   });
   return created.id;

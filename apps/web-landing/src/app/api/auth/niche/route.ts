@@ -67,8 +67,10 @@ export const PATCH = handle(async (request: Request) => {
         // 60% do preço de venda como custo inicial — ponto de partida, não o
         // custo real: a ficha técnica precisa ser ajustada pelo lojista.
         costPrice: Math.round(Number(item.unitPrice) * 0.6 * 100) / 100,
+        averageCost: Math.round(Number(item.unitPrice) * 0.6 * 100) / 100,
         stockQuantity: 0,
         active: true,
+        unit: "un",
       })),
     });
 

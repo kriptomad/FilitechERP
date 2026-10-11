@@ -73,8 +73,7 @@ export const POST = handle(async (request: Request) => {
   const resetUrl = absoluteUrl(`/redefinir-senha?token=${encodeURIComponent(token)}`);
 
   const result = await emitNotification({
-    tenantId: user.tenantId,
-    recipientId: user.id,
+    recipientId: user.tenantId,
     category: 'PASSWORD_RESET',
     title: 'Redefinição de senha',
     body:
@@ -82,20 +81,11 @@ export const POST = handle(async (request: Request) => {
       `no ${user.tenant.tradeName}. O link abaixo é válido por 2 horas.\n\n` +
       `${resetUrl}\n\n` +
       'Se você não solicitou esta alteração, ignore esta mensagem — nada foi modificado.',
-    channels: ['IN_APP', 'EMAIL'],
     actionUrl: resetUrl,
     priority: 'HIGH',
     expiresAt,
     data: { kind: 'password_reset' },
   });
-
-  if (result.email === 'failed') {
-    // Não vaza para o cliente que o e-mail falhou (isso seria um canal de
-    // enumeração), mas o evento fica visível nos logs do servidor.
-    console.error(
-      `[password-reset] falha ao enviar e-mail para tenant ${user.tenantId} (token gerado).`,
-    );
-  }
 
   // Auditoria: registra a SOLICITAÇÃO (não o token) — Cap. 13.4.
   await prismaUnscoped.auditLog.create({

@@ -8,7 +8,11 @@ const PUBLIC_KEY = readFileSync(process.env.JWT_PUBLIC_KEY_PATH!, "utf8");
 export interface SessionClaims {
   userId: string;
   tenantId: string;
-  role: "OWNER" | "MANAGER" | "TECHNICIAN" | "CASHIER";
+  // `ACCOUNTANT` entrou junto com o Portal do Contador (Cap. 20.9 / 21.18):
+  // papel somente-leitura do escritório que contracted o cliente. Sem ele
+  // aqui, o `signSessionToken({ role: found.role })` do login não compilava
+  // assim que o enum do schema ganhou o valor.
+  role: "OWNER" | "MANAGER" | "TECHNICIAN" | "CASHIER" | "ACCOUNTANT";
   temp2faSecret?: string;
   temp2faBackupCodes?: string[];
   sessionId: string;

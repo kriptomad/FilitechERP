@@ -190,8 +190,11 @@ export async function POST(request: Request) {
               name: item.name,
               category: item.category,
               unitPrice: item.unitPrice,
+              // Custo médio = 60% do preço de venda (mesmo cálculo do template de nicho)
+              averageCost: Math.round(Number(item.unitPrice) * 0.6 * 100) / 100,
               stockQuantity: new Prisma.Decimal(0),
               active: true,
+              unit: "un",
             })),
           });
         }

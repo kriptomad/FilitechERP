@@ -1,6 +1,6 @@
 // src/routes/password-reset.routes.ts — Reset de senha com token seguro
 import { Router, Request, Response } from "express";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { addHours } from "date-fns";
 import { prismaUnscoped } from "../lib/prisma.js";
 import { hashPassword, verifyPassword } from "../auth/password.service.js";
@@ -8,6 +8,21 @@ import { apiSuccess, apiError } from "../types/api-envelope.js";
 import { emitNotification } from "../services/notifications/notification.service.js";
 
 export const passwordResetRouter = Router();
+
+/**
+ * SHA-256 do token de redefinição.
+ *
+ * O schema guarda `tokenHash` (e não `token`) porque o valor puro nunca pode
+ * ir para o banco: vazamento de dump permitiria sequestrar qualquer conta com
+ * um SELECT simples. O e-mail leva o token cru (o único lugar onde ele existe);
+ * o reset re-hashia o que o usuário devolve e compara por igualdade — padrão
+ * OWASP Forgot Password Cheat Sheet (Cap. 14.3), idêntico ao do Django.
+ *
+ * SHA-256 (e não bcrypt/argon2) é o correto aqui: o token tem 256 bits de
+ * entropia gerados por `randomBytes(32)`, ou seja, não há dicionário para
+ *(brute-forçar) — o custo de KDF só adicionaria latência sem ganho real.
+ */
+const hashResetToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
 passwordResetRouter.post(
   "/auth/password/forgot",
@@ -24,7 +39,9 @@ passwordResetRouter.post(
       const expiresAt = addHours(new Date(), 2);
 
       await prismaUnscoped.passwordResetToken.create({
-        data: { userId: user.id, token, expiresAt },
+        // `tenantId` é obrigatório no schema (todo dado de negócio é
+        // tenant-scoped — Cap. 7). Sem ele o INSERT estourava em runtime.
+        data: { tenantId: user.tenantId, userId: user.id, tokenHash: hashResetToken(token), expiresAt },
       });
 
       // Em produção: enviar e-mail via fila (emitNotification)
@@ -52,7 +69,11 @@ passwordResetRouter.post(
       if (!token || !password) return res.status(400).json(apiError("VALIDATION_ERROR", "Token e nova senha são obrigatórios."));
       if (password.length < 8) return res.status(400).json(apiError("VALIDATION_ERROR", "A senha deve ter pelo menos 8 caracteres."));
 
-      const resetToken = await prismaUnscoped.passwordResetToken.findUnique({ where: { token } });
+      // Re-hash do token vindo do usuário e busca por igualdade: o banco nunca
+      // contém o valor em texto puro (ver `hashResetToken`).
+      const resetToken = await prismaUnscoped.passwordResetToken.findUnique({
+        where: { tokenHash: hashResetToken(token) },
+      });
       if (!resetToken || resetToken.expiresAt < new Date() || resetToken.usedAt) {
         return res.status(400).json(apiError("INVALID_TOKEN", "Token inválido ou expirado."));
       }
