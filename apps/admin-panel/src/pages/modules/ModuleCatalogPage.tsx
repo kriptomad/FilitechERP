@@ -39,7 +39,7 @@ export function ModuleCatalogPage() {
   const [moduleDialog, setModuleDialog] = useState<{ open: boolean; editing: Module | null }>({ open: false, editing: null });
   const [planForm, setPlanForm] = useState({
     code: '', label: '', basePrice: 0, includedModules: '', active: true,
-    audience: 'BUSINESS' as const, maxConnectedAccounts: '',
+    audience: 'BUSINESS', maxConnectedAccounts: '',
   });
   const [moduleForm, setModuleForm] = useState({
     code: '', label: '', monthlyPrice: 0, description: '', active: true,
@@ -225,7 +225,7 @@ export function ModuleCatalogPage() {
                       <TableCell><Typography variant="body2" fontFamily="monospace" fontWeight={600}>{m.code}</Typography></TableCell>
                       <TableCell>{m.label}</TableCell>
                       <TableCell align="right"><Typography variant="body2" fontWeight={600} fontFamily="monospace">{brl(m.monthlyPrice)}</Typography></TableCell>
-                      <TableCell><Typography variant="body2" color="text.secondary" maxLines={1} sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{m.description}</Typography></TableCell>
+                      <TableCell><Typography variant="body2" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{m.description}</Typography></TableCell>
                       <TableCell><Chip label={m.active ? 'Ativo' : 'Inativo'} size="small" color={m.active ? 'success' : 'default'} variant={m.active ? 'filled' : 'outlined'} /></TableCell>
                       <TableCell align="right">
                         <IconButton size="small" onClick={() => openEditModule(m)}><Edit /></IconButton>

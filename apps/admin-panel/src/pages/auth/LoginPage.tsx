@@ -121,7 +121,7 @@ export function LoginPage() {
                   required
                   autoComplete="one-time-code"
                   inputMode="numeric"
-                  maxLength={6}
+                  inputProps={{ maxLength: 6 }}
                   InputProps={{
                     endAdornment: (
                       <InputAdornment position="end">

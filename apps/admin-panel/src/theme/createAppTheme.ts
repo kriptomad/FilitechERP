@@ -146,12 +146,6 @@ export function createAppTheme(mode: 'light' | 'dark') {
           body: { fontSize: typographyTokens.scale.sm },
         },
       },
-      MuiDataGrid: {
-        styleOverrides: {
-          root: { border: 'none', '& .MuiDataGrid-cell': { borderBottom: '1px solid rgba(0,0,0,0.04)' } },
-          columnHeaders: { backgroundColor: isDark ? colorTokens.surface.darkElevated : colorTokens.surface.lightElevated },
-        },
-      },
       MuiChip: {
         styleOverrides: { root: { borderRadius: 8, fontWeight: 500 } },
       },
