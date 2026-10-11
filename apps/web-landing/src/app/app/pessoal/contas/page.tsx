@@ -51,7 +51,7 @@ export default function ContasPage() {
   async function loadAccounts() {
     try {
       const json = await api<{ accounts: Account[] }>('/api/pessoal/contas');
-      setAccounts(json.data.accounts);
+      setAccounts(json.accounts);
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Falha ao carregar contas');
