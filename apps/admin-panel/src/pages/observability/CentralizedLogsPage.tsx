@@ -1,14 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  Box, Card, CardContent, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, TablePagination, TextField, InputAdornment,
-  Chip, IconButton, Tooltip, CircularProgress, Typography, FormControl,
-  InputLabel, Select, MenuItem, Alert
-} from '@mui/material';
-import { Search, FilterList, Refresh } from '@mui/icons-material';
-import { apiAdmin, ApiError } from '../../../api/apiAdmin';
+import { Alert, Box, Button, Card, Chip, CircularProgress, FormControl, InputAdornment, InputLabel, MenuItem, Select, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from '@mui/material';;;;
+import { Search, Refresh } from '@mui/icons-material';;
+import { apiAdmin, ApiError } from '../../api/apiAdmin';
 
 interface LogEntry {
   id: string;
@@ -95,8 +90,8 @@ export function CentralizedLogsPage() {
             <FormControl sx={{ ml: 1 }}>
               <InputLabel>Auto-refresh</InputLabel>
               <Select value={autoRefresh.toString()} label="Auto-refresh" onChange={(e) => setAutoRefresh(e.target.value === 'true')}>
-                <MenuItem value={true}>Ligado (10s)</MenuItem>
-                <MenuItem value={false}>Desligado</MenuItem>
+                <MenuItem value="true">Ligado (10s)</MenuItem>
+                <MenuItem value="false">Desligado</MenuItem>
               </Select>
             </FormControl>
           </Box>
@@ -154,6 +149,6 @@ export function CentralizedLogsPage() {
   );
 }
 
-function Code({ children }: { children: React.ReactNode }) {
-  return <Typography variant="body2" fontFamily="monospace" sx={{ fontSize: 11, color: 'text.secondary', maxWidth: 300, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{children}</Typography>;
+function Code({ children, sx }: { children: React.ReactNode; sx?: object }) {
+  return <Typography variant="body2" fontFamily="monospace" sx={{ fontSize: 11, color: 'text.secondary', maxWidth: 300, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...sx }}>{children}</Typography>;
 }

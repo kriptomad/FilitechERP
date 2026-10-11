@@ -1,4 +1,8 @@
 import { createTheme } from '@mui/material/styles';
+// Augmenta `Theme.components` com a chave `MuiDataGrid`. Sem este import de
+// TIPO o pacote nao registra o componente e o theme rejeita `MuiDataGrid`
+// (TS2353) mesmo com `@mui/x-data-grid` instalado e em uso no painel.
+import type {} from '@mui/x-data-grid';
 
 const colorTokens = {
   brand: {

@@ -143,7 +143,6 @@ export const POST = handle(async (request: Request) => {
   const inviteUrl = absoluteUrl('/entrar');
 
   await emitNotification({
-    tenantId: session.tenantId,
     recipientId: created.id,
     category: 'USER_INVITED',
     title: 'Você foi convidado para o Filitech ERP',
@@ -152,7 +151,7 @@ export const POST = handle(async (request: Request) => {
       `e use as credenciais abaixo para entrar.\n\n` +
       `E-mail: ${email}\nSenha provisória: ${tempPassword}\n\n` +
       'Troque a senha após o primeiro acesso.',
-    channels: ['IN_APP', 'EMAIL'],
+    sourceType: 'EMAIL',
     actionUrl: inviteUrl,
     priority: 'HIGH',
     data: { role: mappedRole },

@@ -1,16 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import {
-  Box, Card, CardContent, Grid, Typography, Chip, Button, 
-  Table, TableBody, TableCell, TableHead, TableRow,
-  TableContainer, Alert, CircularProgress, Tabs, Tab,
-  Accordion, AccordionSummary, AccordionDetails, IconButton
-} from '@mui/material';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Grid, IconButton, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tabs, TextField, Typography } from '@mui/material';
 import { ExpandMore, Visibility, Check, Close, Add } from '@mui/icons-material';
-import { apiAdmin, ApiError } from '../../../../api/apiAdmin';
-import { brl } from '../../../../../lib/brl';
+import { apiAdmin, ApiError } from '../../api/apiAdmin';
+import { brl } from '../../lib/brl';
 
 interface TenantDetail {
   tenant: {
@@ -437,6 +432,6 @@ export function TenantDetailPage() {
   );
 }
 
-function Code({ children }: { children: React.ReactNode }) {
-  return <Typography variant="body2" fontFamily="monospace" style={{ fontSize: 12, color: '#71717A', whiteSpace: 'pre-wrap' }}>{children}</Typography>;
+function Code({ children, sx }: { children: React.ReactNode; sx?: object }) {
+  return <Typography variant="body2" fontFamily="monospace" style={{ fontSize: 12, color: '#71717A', whiteSpace: 'pre-wrap', ...(sx as object)}}>{children}</Typography>;
 }

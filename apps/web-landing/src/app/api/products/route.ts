@@ -107,6 +107,8 @@ export const POST = handle(async (request: Request) => {
       requiresPrescriptionRetention: body.requiresPrescriptionRetention === true,
       isControlledSubstance: body.isControlledSubstance === true,
       trackingType: (optionalString(body.trackingType, 'controle', 20) ?? 'NONE') as never,
+      unit: 'un',
+      averageCost: Math.round(requireNumber(body.unitPrice ?? 0, 'preço') * 0.6 * 100) / 100,
     },
   });
 

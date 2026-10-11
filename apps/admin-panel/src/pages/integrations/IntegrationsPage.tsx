@@ -1,15 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  Box, Card, CardContent, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Chip, Typography, Grid, Button, Dialog,
-  DialogTitle, DialogContent, DialogActions, FormControl, InputLabel,
-  Select, MenuItem, TextField, Alert, CircularProgress, Accordion,
-  AccordionSummary, AccordionDetails
-} from '@mui/material';
+import { Box, Card, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel, Select, MenuItem, Alert, CircularProgress, Accordion, AccordionSummary, AccordionDetails } from '@mui/material';;;;
 import { Refresh, PlayArrow, Visibility } from '@mui/icons-material';
-import { apiAdmin, ApiError } from '../../../api/apiAdmin';
+import { apiAdmin, ApiError } from '../../api/apiAdmin';
 
 interface IntegrationCredential {
   id: string;
@@ -196,6 +190,6 @@ export function IntegrationsPage() {
   );
 }
 
-function Code({ children }: { children: React.ReactNode }) {
-  return <Typography variant="body2" fontFamily="monospace" sx={{ fontSize: 11, color: 'text.secondary' }}>{children}</Typography>;
+function Code({ children, sx }: { children: React.ReactNode; sx?: object }) {
+  return <Typography variant="body2" fontFamily="monospace" sx={{ fontSize: 11, color: 'text.secondary', ...sx }}>{children}</Typography>;
 }

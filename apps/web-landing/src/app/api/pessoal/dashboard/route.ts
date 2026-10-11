@@ -60,25 +60,25 @@ export const GET = handle(async (request: Request) => {
       select: { id: true, type: true, amount: true, transactionDate: true, description: true, category: { select: { name: true } } },
     }),
     prismaUnscoped.personalBudget.findMany({
-      where: { tenantId, active: true, alertThreshold: { gt: 0 } },
+      where: { tenantId, alertThreshold: { gt: 0 } },
       include: { category: true },
     }),
     prismaUnscoped.personalBill.findMany({
       where: { tenantId, status: 'PENDING' },
-      select: { id: true, description: true, amount: true, dueDate: true, status: true },
+      select: { id: true, name: true, amount: true, dueDay: true, status: true },
     }),
     prismaUnscoped.personalDebt.findMany({
       where: { tenantId, status: 'ACTIVE' },
-      select: { id: true, name: true, remainingBalance: true, originalAmount: true, interestRate: true, dueDate: true },
+      select: { id: true, name: true, remainingAmount: true, originalAmount: true, interestRateMonthly: true, dueDay: true },
     }),
     prismaUnscoped.personalInvestment.findMany({
       where: { tenantId },
       select: { id: true, assetName: true, assetType: true, currentPrice: true, quantity: true, averagePrice: true },
     }),
     prismaUnscoped.netWorthSnapshot.findMany({
-      where: { tenantId, date: { gte: startOfYear } },
-      orderBy: { date: 'asc' },
-      select: { date: true, netWorth: true, totalAssets: true, totalLiabilities: true },
+      where: { tenantId, snapshotDate: { gte: startOfYear } },
+      orderBy: { snapshotDate: 'asc' },
+      select: { snapshotDate: true, netWorth: true, totalAssets: true, totalLiabilities: true },
     }),
   ]);
 
@@ -86,7 +86,7 @@ export const GET = handle(async (request: Request) => {
   const totalAssets = accounts.reduce((s, a) => s + Number(a.currentBalance), 0) +
     investments.reduce((s, i) => s + Number(i.currentPrice) * Number(i.quantity), 0);
 
-  const totalLiabilities = debts.reduce((s, d) => s + Number(d.remainingBalance), 0);
+  const totalLiabilities = debts.reduce((s, d) => s + Number(d.remainingAmount), 0);
   const netWorth = totalAssets - totalLiabilities;
 
   const monthlyIncome = transactions
@@ -105,15 +105,22 @@ export const GET = handle(async (request: Request) => {
     const spent = transactions
       .filter(t => t.type === 'EXPENSE' && t.category?.name === budget.category.name)
       .reduce((s, t) => s + Number(t.amount), 0);
-    const percentage = Number(budget.amount) > 0 ? (spent / Number(budget.amount)) * 100 : 0;
+    const percentage = Number(budget.limitAmount) > 0 ? (spent / Number(budget.limitAmount)) * 100 : 0;
     if (percentage >= Number(budget.alertThreshold)) budgetAlerts++;
   }
 
   // Contas a pagar
   const nowDate = new Date();
+  const nowDay = nowDate.getDate();
   const in7Days = new Date(nowDate.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const overdueBills = bills.filter(b => new Date(b.dueDate) < nowDate).length;
-  const upcomingBills = bills.filter(b => new Date(b.dueDate) >= nowDate && new Date(b.dueDate) <= in7Days).length;
+  const overdueBills = bills.filter(b => {
+    const dueDate = new Date(nowDate.getFullYear(), nowDate.getMonth(), b.dueDay);
+    return dueDate < nowDate;
+  }).length;
+  const upcomingBills = bills.filter(b => {
+    const dueDate = new Date(nowDate.getFullYear(), nowDate.getMonth(), b.dueDay);
+    return dueDate >= nowDate && dueDate <= in7Days;
+  }).length;
 
   // Resumo de contas
   const accountColors: Record<string, string> = {
@@ -151,7 +158,7 @@ export const GET = handle(async (request: Request) => {
 
   // Histórico de patrimônio (últimos 12 meses)
   const netWorthHistory = netWorthSnapshots.map(s => ({
-    date: s.date.toISOString(),
+    date: s.snapshotDate.toISOString(),
     netWorth: Number(s.netWorth),
     totalAssets: Number(s.totalAssets),
     totalLiabilities: Number(s.totalLiabilities),

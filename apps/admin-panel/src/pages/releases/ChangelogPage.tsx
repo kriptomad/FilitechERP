@@ -1,13 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  Box, Card, CardContent, Button, Dialog, DialogTitle, DialogContent,
-  DialogActions, TextField, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Chip, Typography, Alert, Grid, CircularProgress
-} from '@mui/material';
+import { Alert, Box, Button, Card, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, IconButton, InputLabel, MenuItem, Select, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from '@mui/material';;
 import { Add, Edit, Delete, Visibility } from '@mui/icons-material';
-import { apiAdmin, ApiError } from '../../../api/apiAdmin';
+import { apiAdmin, ApiError } from '../../api/apiAdmin';
 
 interface ReleaseNote {
   id: string;
@@ -140,8 +136,8 @@ export function ChangelogPage() {
               <FormControl>
                 <InputLabel>Público?</InputLabel>
                 <Select value={form.isPublic ? 'true' : 'false'} label="Público" onChange={(e) => setForm({...form, isPublic: e.target.value === 'true'})}>
-                  <MenuItem value={true}>Sim (aparece no status público)</MenuItem>
-                  <MenuItem value={false}>Não (apenas interno)</MenuItem>
+                  <MenuItem value="true">Sim (aparece no status público)</MenuItem>
+                  <MenuItem value="false">Não (apenas interno)</MenuItem>
                 </Select>
               </FormControl>
             </Grid>

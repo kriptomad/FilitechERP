@@ -1,14 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { 
-  Box, Card, CardContent, Table, TableBody, TableCell, TableContainer, 
-  TableHead, TableRow, TablePagination, TextField, InputAdornment, 
-  Chip, IconButton, Tooltip, CircularProgress, Typography, Paper
-} from '@mui/material';
+import { Box, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, TextField, InputAdornment, Chip, IconButton, Tooltip, CircularProgress, Typography, Paper } from '@mui/material';;;
 import { Search, Visibility as VisibilityIcon } from '@mui/icons-material';
-import { apiAdmin, ApiError } from '../../../../api/apiAdmin';
-import { brl } from '../../../../../lib/brl';
+import { apiAdmin, ApiError } from '../../api/apiAdmin';
+import { brl } from '../../lib/brl';
 
 interface Tenant {
   id: string;
@@ -218,6 +214,6 @@ export function TenantListPage() {
   );
 }
 
-function Code({ children }: { children: React.ReactNode }) {
-  return <Typography variant="body2" fontFamily="monospace" style={{ fontSize: 12, color: '#71717A' }}>{children}</Typography>;
+function Code({ children, sx }: { children: React.ReactNode; sx?: object }) {
+  return <Typography variant="body2" fontFamily="monospace" style={{ fontSize: 12, color: '#71717A', ...(sx as object)}}>{children}</Typography>;
 }

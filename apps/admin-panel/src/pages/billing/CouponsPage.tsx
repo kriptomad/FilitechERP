@@ -1,15 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  Box, Card, CardContent, Button, Dialog, DialogTitle, DialogContent,
-  DialogActions, TextField, FormControl, InputLabel, Select, MenuItem,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  TablePagination, Chip, Typography, Alert, Grid, CircularProgress
-} from '@mui/material';
-import { Add, Delete, Edit, Visibility } from '@mui/icons-material';
-import { apiAdmin, ApiError } from '../../../api/apiAdmin';
-import { brl } from '../../../../lib/brl';
+import { Alert, Box, Button, Card, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, IconButton, InputLabel, MenuItem, Select, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from '@mui/material';;
+import { Add, Delete, Edit } from '@mui/icons-material';;
+import { apiAdmin, ApiError } from '../../api/apiAdmin';
+import { brl } from '../../lib/brl';
 
 interface Coupon {
   id: string;
@@ -229,8 +224,8 @@ export function CouponsPage() {
               <FormControl>
                 <InputLabel>Status</InputLabel>
                 <Select value={form.active ? 'true' : 'false'} label="Status" onChange={(e) => setForm({...form, active: e.target.value === 'true'})}>
-                  <MenuItem value={true}>Ativo</MenuItem>
-                  <MenuItem value={false}>Inativo</MenuItem>
+                  <MenuItem value="true">Ativo</MenuItem>
+                  <MenuItem value="false">Inativo</MenuItem>
                 </Select>
               </FormControl>
             </Grid>

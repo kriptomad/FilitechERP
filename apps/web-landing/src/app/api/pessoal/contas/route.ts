@@ -62,5 +62,5 @@ export const POST = handle(async (request: Request) => {
     },
   });
 
-  return jsonSuccess({ account }, { status: 201 });
+  return jsonSuccess({ account });
 });

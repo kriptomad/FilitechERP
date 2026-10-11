@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { apiAdmin } from '../api/apiAdmin';
+import { apiAdmin } from '../../api/apiAdmin';
 
 interface AdminUser {
   id: string;

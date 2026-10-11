@@ -1,15 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  Box, Card, CardContent, Button, Dialog, DialogTitle, DialogContent,
-  DialogActions, TextField, FormControl, InputLabel, Select, MenuItem,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, Typography, Grid, Alert, CircularProgress
-} from '@mui/material';
+import { Alert, Box, Button, Card, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, IconButton, InputLabel, MenuItem, Select, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from '@mui/material';;
 import { Add, Edit, Delete } from '@mui/icons-material';
-import { apiAdmin, ApiError } from '../../../api/apiAdmin';
-import { brl } from '../../../../lib/brl';
+import { apiAdmin, ApiError } from '../../api/apiAdmin';
+import { brl } from '../../lib/brl';
 
 interface Plan {
   id: string;
@@ -279,8 +274,8 @@ export function ModuleCatalogPage() {
               <FormControl>
                 <InputLabel>Status</InputLabel>
                 <Select value={planForm.active ? 'true' : 'false'} label="Status" onChange={(e) => setPlanForm({...planForm, active: e.target.value === 'true'})}>
-                  <MenuItem value={true}>Ativo</MenuItem>
-                  <MenuItem value={false}>Inativo</MenuItem>
+                  <MenuItem value="true">Ativo</MenuItem>
+                  <MenuItem value="false">Inativo</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
@@ -313,8 +308,8 @@ export function ModuleCatalogPage() {
               <FormControl>
                 <InputLabel>Status</InputLabel>
                 <Select value={moduleForm.active ? 'true' : 'false'} label="Status" onChange={(e) => setModuleForm({...moduleForm, active: e.target.value === 'true'})}>
-                  <MenuItem value={true}>Ativo</MenuItem>
-                  <MenuItem value={false}>Inativo</MenuItem>
+                  <MenuItem value="true">Ativo</MenuItem>
+                  <MenuItem value="false">Inativo</MenuItem>
                 </Select>
               </FormControl>
             </Grid>

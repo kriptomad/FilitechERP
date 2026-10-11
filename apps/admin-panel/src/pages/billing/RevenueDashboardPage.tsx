@@ -1,14 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  Box, Card, CardContent, Grid, Typography, Chip, Table,
-  TableBody, TableCell, TableContainer, TableHead, TableRow,
-  TablePagination, Select, MenuItem, FormControl, InputLabel,
-  CircularProgress
-} from '@mui/material';
-import { apiAdmin, ApiError } from '../../../api/apiAdmin';
-import { brl } from '../../../../lib/brl';
+import { Box, Card, CardContent, Grid, Typography, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, CircularProgress } from '@mui/material';;;;;
+import { apiAdmin, ApiError } from '../../api/apiAdmin';
+import { brl } from '../../lib/brl';
 
 interface RevenueData {
   mrr: { total: number; byPlan: Record<string, number>; byModule: Record<string, number> };
@@ -210,7 +205,7 @@ export function RevenueDashboardPage() {
                     {data.tenants.map((t) => (
                       <TableRow key={t.id} hover>
                         <TableCell>{t.tradeName}</TableCell>
-                        <TableCell align="right" fontFamily="monospace"><Typography variant="body2" fontWeight={600}>{brl(t.mrr)}</Typography></TableCell>
+                        <TableCell align="right"sx={{ fontFamily: 'monospace' }}><Typography variant="body2" fontWeight={600}>{brl(t.mrr)}</Typography></TableCell>
                         <TableCell>{t.planCode}</TableCell>
                         <TableCell>
                           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>

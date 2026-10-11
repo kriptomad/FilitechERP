@@ -3,17 +3,17 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '../shared/auth/AuthProvider';
 import { FullScreenSpinner } from '../shared/ui/FullScreenSpinner';
 
-const LoginPage = lazy(() => import('../pages/auth/LoginPage'));
-const TenantListPage = lazy(() => import('../pages/tenants/TenantListPage'));
-const TenantDetailPage = lazy(() => import('../pages/tenants/TenantDetailPage'));
-const RevenueDashboardPage = lazy(() => import('../pages/billing/RevenueDashboardPage'));
-const CouponsPage = lazy(() => import('../pages/billing/CouponsPage'));
-const ModuleCatalogPage = lazy(() => import('../pages/modules/ModuleCatalogPage'));
-const AuditLogPage = lazy(() => import('../pages/observability/AuditLogPage'));
-const CentralizedLogsPage = lazy(() => import('../pages/observability/CentralizedLogsPage'));
-const SystemParametersPage = lazy(() => import('../pages/observability/SystemParametersPage'));
-const ChangelogPage = lazy(() => import('../pages/releases/ChangelogPage'));
-const IntegrationsPage = lazy(() => import('../pages/integrations/IntegrationsPage'));
+const LoginPage = lazy(() => import('../pages/auth/LoginPage').then((m) => ({ default: m.LoginPage })));
+const TenantListPage = lazy(() => import('../pages/tenants/TenantListPage').then((m) => ({ default: m.TenantListPage })));
+const TenantDetailPage = lazy(() => import('../pages/tenants/TenantDetailPage').then((m) => ({ default: m.TenantDetailPage })));
+const RevenueDashboardPage = lazy(() => import('../pages/billing/RevenueDashboardPage').then((m) => ({ default: m.RevenueDashboardPage })));
+const CouponsPage = lazy(() => import('../pages/billing/CouponsPage').then((m) => ({ default: m.CouponsPage })));
+const ModuleCatalogPage = lazy(() => import('../pages/modules/ModuleCatalogPage').then((m) => ({ default: m.ModuleCatalogPage })));
+const AuditLogPage = lazy(() => import('../pages/observability/AuditLogPage').then((m) => ({ default: m.AuditLogPage })));
+const CentralizedLogsPage = lazy(() => import('../pages/observability/CentralizedLogsPage').then((m) => ({ default: m.CentralizedLogsPage })));
+const SystemParametersPage = lazy(() => import('../pages/observability/SystemParametersPage').then((m) => ({ default: m.SystemParametersPage })));
+const ChangelogPage = lazy(() => import('../pages/releases/ChangelogPage').then((m) => ({ default: m.ChangelogPage })));
+const IntegrationsPage = lazy(() => import('../pages/integrations/IntegrationsPage').then((m) => ({ default: m.IntegrationsPage })));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
